@@ -98,7 +98,7 @@ export default function TaskInput({ onSubmit, onStop, isRunning, isConnecting = 
   const [config, setConfig] = useState({
     model: 'gpt-4.1-2025-04-14',
     maxRounds: 25,
-    maxAttempts: 1,
+    maxAttempts: 6,
     agent: 'engineer',
     workDir: appConfig.workDir,
     mode: 'one-shot' as 'one-shot' | 'planning-control' | 'idea-generation' | 'ocr' | 'arxiv' | 'enhance-input' | 'hitl-interactive' | 'copilot',

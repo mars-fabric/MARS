@@ -18,6 +18,7 @@ from routers.tasks import router as tasks_router
 from routers.phases import router as phases_router
 from routers.copilot import router as copilot_router
 from routers.sessions import router as sessions_router
+from routers.pda import router as pda_router
 
 
 def register_routers(app):
@@ -34,6 +35,7 @@ def register_routers(app):
     app.include_router(branching_router)
     app.include_router(runs_router)
     app.include_router(nodes_router)
+    app.include_router(pda_router)  # Product Discovery Assistant
 
 
 __all__ = [
@@ -50,4 +52,5 @@ __all__ = [
     "phases_router",
     "copilot_router",
     "sessions_router",
+    "pda_router",
 ]

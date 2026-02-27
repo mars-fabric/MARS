@@ -97,6 +97,14 @@ class IsolatedTaskExecutor:
         task_work_dir = os.path.join(work_dir, "sessions", session_id, "tasks", task_id)
         os.makedirs(task_work_dir, exist_ok=True)
 
+        # Create standard subdirectories that agents expect
+        # These match the directories created in cmbagent.py
+        os.makedirs(os.path.join(task_work_dir, "data"), exist_ok=True)
+        os.makedirs(os.path.join(task_work_dir, "codebase"), exist_ok=True)
+        os.makedirs(os.path.join(task_work_dir, "chats"), exist_ok=True)
+        os.makedirs(os.path.join(task_work_dir, "planning"), exist_ok=True)
+        os.makedirs(os.path.join(task_work_dir, "control"), exist_ok=True)
+
         # Start subprocess
         process = Process(
             target=_run_task_in_subprocess,

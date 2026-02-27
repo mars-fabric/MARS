@@ -3,7 +3,7 @@ WebSocket event helpers and utilities.
 """
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
@@ -43,7 +43,7 @@ async def send_ws_event(
 
     message = {
         "event_type": event_type,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "data": data or {}
     }
 

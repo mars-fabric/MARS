@@ -143,6 +143,14 @@ async def execute_cmbagent_task(
     task_work_dir = os.path.join(work_dir, "sessions", session_id, "tasks", task_id)
     os.makedirs(task_work_dir, exist_ok=True)
 
+    # Create standard subdirectories that agents expect
+    # These match the directories created in cmbagent.py
+    os.makedirs(os.path.join(task_work_dir, "data"), exist_ok=True)
+    os.makedirs(os.path.join(task_work_dir, "codebase"), exist_ok=True)
+    os.makedirs(os.path.join(task_work_dir, "chats"), exist_ok=True)
+    os.makedirs(os.path.join(task_work_dir, "planning"), exist_ok=True)
+    os.makedirs(os.path.join(task_work_dir, "control"), exist_ok=True)
+
     # Set up environment variables
     os.environ["CMBAGENT_DEBUG"] = "false"
     os.environ["CMBAGENT_DISABLE_DISPLAY"] = "true"
@@ -1185,6 +1193,10 @@ async def _execute_isolated(
     work_dir = config.get("workDir", settings.default_work_dir)
     if work_dir.startswith("~"):
         work_dir = os.path.expanduser(work_dir)
+
+    # Create task directory nested under session (same as in-process path)
+    # Structure: {work_dir}/sessions/{session_id}/tasks/{task_id}
+    task_work_dir = os.path.join(work_dir, "sessions", session_id, "tasks", task_id)
 
     async def output_callback(event_type: str, data: Dict[str, Any]):
         """Forward subprocess output to WebSocket and track state (Stage 7)."""

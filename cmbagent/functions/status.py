@@ -144,10 +144,24 @@ def _record_status_chat_mode(current_status, current_plan_step_number, current_s
         context_variables["n_attempts"] = 0
 
     if "failed" in context_variables["current_status"]:
-        if context_variables["agent_for_sub_task"] == "engineer":
+        n_attempts = context_variables.get("n_attempts", 0) + 1
+        context_variables["n_attempts"] = n_attempts
+        max_attempts = context_variables.get("max_n_attempts", 3)
+
+        if n_attempts >= max_attempts:
+            # Exceeded retries — treat as completed so we don't loop forever
+            logger.warning("max_retries_exceeded_chat",
+                           agent=context_variables["agent_for_sub_task"],
+                           attempts=n_attempts)
+            context_variables["current_status"] = "completed"
+            agent_to_transfer_to = admin
+        elif context_variables["agent_for_sub_task"] == "engineer":
             agent_to_transfer_to = cmbagent_instance.get_agent_from_name('engineer')
         elif context_variables["agent_for_sub_task"] == "researcher":
-            agent_to_transfer_to = cmbagent_instance.get_agent_from_name('researcher_response_formatter')
+            # Route to 'researcher' (not 'researcher_response_formatter') so the
+            # full chain runs again with fresh messages, avoiding the empty-message
+            # edge case in MessageHistoryLimiter.
+            agent_to_transfer_to = cmbagent_instance.get_agent_from_name('researcher')
 
     if cmbagent_debug:
         if agent_to_transfer_to is None:
@@ -250,10 +264,24 @@ def _record_status_default_mode(current_status, current_plan_step_number, curren
                 context_variables["n_attempts"] = 0
 
     if "failed" in context_variables["current_status"]:
-        if context_variables["agent_for_sub_task"] == "engineer":
+        n_attempts = context_variables.get("n_attempts", 0) + 1
+        context_variables["n_attempts"] = n_attempts
+        max_attempts = context_variables.get("max_n_attempts", 3)
+
+        if n_attempts >= max_attempts:
+            # Exceeded retries — treat as completed so we don't loop forever
+            logger.warning("max_retries_exceeded_default",
+                           agent=context_variables["agent_for_sub_task"],
+                           attempts=n_attempts)
+            context_variables["current_status"] = "completed"
+            agent_to_transfer_to = terminator
+        elif context_variables["agent_for_sub_task"] == "engineer":
             agent_to_transfer_to = cmbagent_instance.get_agent_from_name('engineer')
         elif context_variables["agent_for_sub_task"] == "researcher":
-            agent_to_transfer_to = cmbagent_instance.get_agent_from_name('researcher_response_formatter')
+            # Route to 'researcher' (not 'researcher_response_formatter') so the
+            # full chain runs again with fresh messages, avoiding the empty-message
+            # edge case in MessageHistoryLimiter.
+            agent_to_transfer_to = cmbagent_instance.get_agent_from_name('researcher')
 
     if cmbagent_debug:
         if agent_to_transfer_to is None:

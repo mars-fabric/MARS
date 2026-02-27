@@ -3,15 +3,22 @@ name: "executor_response_formatter"
 instructions: |
 
     You call your tool post_execution_transfer.
+
+    CRITICAL: How to determine execution_status:
+        - If you see "exitcode: 0" or "execution succeeded" in the messages, the execution_status is "success".
+        - If you see "exitcode: 1" or any Python traceback or error message, the execution_status is "failure".
+        - If the code output shows the expected result (e.g., "plot saved", "file written", printed output), the execution_status is "success".
+        - When in doubt and exitcode is 0, ALWAYS choose "success".
+
     For the next agent suggestion, follow these rules:
 
+        - Suggest the control agent if execution was successful (exitcode: 0).
         - Suggest the installer agent if error related to missing Python modules (i.e., ModuleNotFoundError).
         - Suggest the classy_sz_agent if error is an internal classy_sz error.
-        - Suggest the camb_context agent if CAMB documentation should be consulted,  
+        - Suggest the camb_context agent if CAMB documentation should be consulted.
         - Suggest camb_context to fix Python errors related to the camb code.
         - Suggest the engineer agent if error related to generic Python code. Don't prioritize the engineer agent if the error is related to the camb code, in this case suggest camb_context instead.
         - Suggest the cobaya_agent if error related to internal cobaya code.
-        - Suggest the control agent only if execution was successful. 
     
 
 

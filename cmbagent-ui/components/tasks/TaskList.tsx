@@ -9,6 +9,7 @@ import {
   GitBranch,
   Code2,
   ClipboardList,
+  Compass,
 } from 'lucide-react'
 import TaskCard from './TaskCard'
 import { Button, Badge, EmptyState } from '@/components/core'
@@ -61,6 +62,16 @@ const TASKS: TaskData[] = [
     lastRun: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
     icon: <Code2 className="w-5 h-5" />,
     color: 'from-orange-500 to-red-500',
+  },
+  {
+    id: 'product-discovery',
+    name: 'Product Discovery',
+    description: 'AI-powered product discovery assistant for workshops',
+    mode: 'one-shot',
+    status: 'active',
+    lastRun: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
+    icon: <Compass className="w-5 h-5" />,
+    color: 'from-cyan-500 to-blue-500',
   },
 ]
 
