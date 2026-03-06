@@ -33,16 +33,49 @@ export default function SessionScreen() {
   const [error, setError] = useState<string | null>(null)
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<Date | null>(null)
+
+  const getSortTimestamp = (session: Session): number => {
+    const ts = session.updated_at || session.created_at
+    if (!ts) return 0
+    const parsed = parseSessionDate(ts).getTime()
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+
+  const parseSessionDate = (iso: string): Date => {
+    // Treat timestamps without timezone suffix as UTC to avoid local-time skew.
+    const hasTimezone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
+    return new Date(hasTimezone ? iso : `${iso}Z`)
+  }
 
   const fetchSessions = useCallback(async (isInitial = false) => {
     try {
       // Only show loading skeleton on the very first fetch
       if (isInitial) setLoading(true)
       setError(null)
-      const response = await fetch(getApiUrl('/api/sessions?limit=100'))
+      const response = await fetch(getApiUrl('/api/sessions?limit=100'), {
+        cache: 'no-store',
+      })
       if (!response.ok) throw new Error('Failed to fetch sessions')
       const data = await response.json()
-      setSessions(data.sessions || data || [])
+
+      const rawSessions: Session[] = data.sessions || data || []
+
+      // Keep the newest item per session_id (defensive against duplicate backend rows).
+      const latestBySession = new Map<string, Session>()
+      for (const session of rawSessions) {
+        const existing = latestBySession.get(session.session_id)
+        if (!existing || getSortTimestamp(session) > getSortTimestamp(existing)) {
+          latestBySession.set(session.session_id, session)
+        }
+      }
+
+      const sortedSessions = Array.from(latestBySession.values()).sort(
+        (a, b) => getSortTimestamp(b) - getSortTimestamp(a)
+      )
+
+      setSessions(sortedSessions)
+      setLastRefreshedAt(new Date())
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -91,7 +124,9 @@ export default function SessionScreen() {
   // Group sessions by status
   const groupedSessions = STATUS_GROUPS.map((group) => ({
     ...group,
-    sessions: filteredSessions.filter((s) => group.statuses.includes(s.status)),
+    sessions: filteredSessions
+      .filter((s) => group.statuses.includes(s.status))
+      .sort((a, b) => getSortTimestamp(b) - getSortTimestamp(a)),
   })).filter((group) => group.sessions.length > 0)
 
   const totalCount = sessions.length
@@ -123,6 +158,14 @@ export default function SessionScreen() {
               >
                 {totalCount} total{activeCount > 0 ? ` · ${activeCount} active` : ''}
               </p>
+              {lastRefreshedAt && (
+                <p
+                  className="text-xs mt-1"
+                  style={{ color: 'var(--mars-color-text-tertiary)' }}
+                >
+                  Last refreshed: {lastRefreshedAt.toLocaleTimeString()}
+                </p>
+              )}
             </div>
             <IconButton
               variant="ghost"

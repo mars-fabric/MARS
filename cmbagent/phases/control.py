@@ -15,6 +15,7 @@ Uses PhaseExecutionManager for:
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional
 import os
+import shutil
 import time
 import copy
 import json
@@ -224,8 +225,12 @@ class ControlPhase(Phase):
                 # Check for pause/cancel before each step
                 manager.raise_if_cancelled()
 
+                # Resolve the current plan step explicitly to avoid stale carry-over
+                # from previous steps in shared context.
+                plan_step = plan_steps[step - 1] if step <= len(plan_steps) else {}
+
                 # Get step description for callbacks
-                step_desc = plan_steps[step - 1].get('sub_task', f'Step {step}') if step <= len(plan_steps) else f'Step {step}'
+                step_desc = plan_step.get('sub_task', f'Step {step}')
                 manager.start_step(step, step_desc)
 
                 clear_work_dir = (step == 1)
@@ -254,29 +259,61 @@ class ControlPhase(Phase):
                 cmbagent._callbacks = context.callbacks
                 init_time = time.time() - init_start
 
-                # Get agent for this step
-                if step == 1 and plan_steps:
-                    agent_for_step = plan_steps[0].get('sub_task_agent')
-                else:
-                    agent_for_step = current_context.get('agent_for_sub_task')
+                # Get agent for this step from plan first; only then fallback to context.
+                agent_for_step = plan_step.get('sub_task_agent') or current_context.get('agent_for_sub_task')
+
+                # Normalize instructions for status/control routing.
+                step_instructions = plan_step.get('instructions')
+                if not step_instructions:
+                    bullet_points = plan_step.get('bullet_points') or []
+                    if isinstance(bullet_points, list) and bullet_points:
+                        step_instructions = "\n".join(f"- {bp}" for bp in bullet_points)
+                    else:
+                        step_instructions = step_desc
 
                 # Prepare step context
                 step_context = copy.deepcopy(current_context)
                 step_context['current_plan_step_number'] = step
+                step_context['number_of_steps_in_plan'] = len(plan_steps)
                 step_context['n_attempts'] = 0
                 step_context['agent_for_sub_task'] = agent_for_step
+                step_context['current_sub_task'] = step_desc
+                step_context['current_instructions'] = step_instructions
+                step_context['current_status'] = 'in progress'
                 step_context['engineer_append_instructions'] = self.config.engineer_instructions
                 step_context['researcher_append_instructions'] = self.config.researcher_instructions
 
-                # Execute step
+                # Execute step with retry for transient API errors
                 exec_start = time.time()
-                cmbagent.solve(
-                    context.task,
-                    max_rounds=self.config.max_rounds,
-                    initial_agent=starter_agent,
-                    shared_context=step_context,
-                    step=step,
-                )
+                step_max_retries = 3
+                step_base_delay = 5  # seconds
+                for step_attempt in range(1, step_max_retries + 1):
+                    try:
+                        cmbagent.solve(
+                            context.task,
+                            max_rounds=self.config.max_rounds,
+                            initial_agent=starter_agent,
+                            shared_context=step_context,
+                            step=step,
+                        )
+                        break  # success
+                    except Exception as solve_err:
+                        err_str = str(solve_err)
+                        is_rate_limit = (
+                            'rate_limit' in err_str.lower()
+                            or '429' in err_str
+                            or 'RateLimitError' in type(solve_err).__name__
+                        )
+                        if is_rate_limit and step_attempt < step_max_retries:
+                            delay = step_base_delay * (2 ** (step_attempt - 1))
+                            logger.warning(
+                                "Rate limit hit during step %d (attempt %d/%d), "
+                                "retrying in %ds: %s",
+                                step, step_attempt, step_max_retries, delay, solve_err,
+                            )
+                            time.sleep(delay)
+                        else:
+                            raise
                 exec_time = time.time() - exec_start
 
                 # Check for failures
@@ -365,6 +402,34 @@ class ControlPhase(Phase):
                 logger.info("Step %d completed in %.4f seconds", step, exec_time)
 
             # Build output
+            # Copy output files from control_dir to task work_dir
+            # The executor writes files inside control_dir, but the frontend
+            # looks in the task root. Copy any report/output files up.
+            output_extensions = {'.md', '.txt', '.csv', '.json', '.html', '.pdf'}
+            try:
+                for item in os.listdir(control_dir):
+                    item_path = os.path.join(control_dir, item)
+                    if os.path.isfile(item_path):
+                        ext = os.path.splitext(item)[1].lower()
+                        if ext in output_extensions:
+                            dest = os.path.join(context.work_dir, item)
+                            shutil.copy2(item_path, dest)
+                            logger.info("Copied output file %s to %s", item, dest)
+                # Also search in control_dir subdirectories (e.g. data/, codebase/)
+                for subdir in ['data', 'codebase']:
+                    sub_path = os.path.join(control_dir, subdir)
+                    if os.path.isdir(sub_path):
+                        for item in os.listdir(sub_path):
+                            item_path = os.path.join(sub_path, item)
+                            if os.path.isfile(item_path):
+                                ext = os.path.splitext(item)[1].lower()
+                                if ext in output_extensions:
+                                    dest = os.path.join(context.work_dir, item)
+                                    shutil.copy2(item_path, dest)
+                                    logger.info("Copied output file %s from %s to %s", item, subdir, dest)
+            except Exception as copy_err:
+                logger.warning("Failed to copy output files: %s", copy_err)
+
             output_data = {
                 'step_results': step_results,
                 'final_context': current_context,

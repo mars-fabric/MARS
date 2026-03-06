@@ -10,10 +10,13 @@ Session management (Stages 10-11):
 import asyncio
 import concurrent.futures
 import contextvars
+import glob
 import os
+import shutil
 import sys
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import WebSocket
@@ -1046,6 +1049,42 @@ async def execute_cmbagent_task(
                     dag_tracker.track_files_in_work_dir(task_work_dir, node_id)
             if "terminator" in dag_tracker.node_statuses:
                 await dag_tracker.update_node_status("terminator", "completed")
+
+        # Copy report files to the configured output directory (e.g. backend/)
+        report_output_dir = config.get("reportOutputDir")
+        if report_output_dir:
+            try:
+                report_output_dir = os.path.expanduser(report_output_dir)
+                os.makedirs(report_output_dir, exist_ok=True)
+                pattern = config.get("reportFilenamePattern", "*.md")
+                # Search recursively in task work dir for matching files
+                found_files = glob.glob(os.path.join(task_work_dir, "**", pattern), recursive=True)
+                # Also search for any ai_weekly_report_*.md as fallback
+                if not found_files:
+                    found_files = glob.glob(os.path.join(task_work_dir, "**", "ai_weekly_report_*.md"), recursive=True)
+                # Also check the codebase subdirectory specifically
+                if not found_files:
+                    found_files = glob.glob(os.path.join(task_work_dir, "codebase", "*.md"))
+                for src_path in found_files:
+                    dst_path = os.path.join(report_output_dir, os.path.basename(src_path))
+                    shutil.copy2(src_path, dst_path)
+                    logger.info("Copied report file %s -> %s", src_path, dst_path)
+                    await send_ws_event(
+                        websocket, "output",
+                        {"message": f"📄 Report copied to: {dst_path}"},
+                        run_id=task_id,
+                        session_id=session_id
+                    )
+                if not found_files:
+                    logger.warning("No report files found in %s to copy to %s", task_work_dir, report_output_dir)
+                    await send_ws_event(
+                        websocket, "output",
+                        {"message": f"⚠️ No report files found in work directory to copy"},
+                        run_id=task_id,
+                        session_id=session_id
+                    )
+            except Exception as e:
+                logger.error("Failed to copy report files to %s: %s", report_output_dir, e)
 
         # Safety net: scan work_dir/cost/ for any cost JSONs not yet persisted
         # This catches cases where the callback-based path silently failed

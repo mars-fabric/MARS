@@ -22,6 +22,8 @@ import { SessionConsoleTab } from "./SessionConsoleTab";
 import { SessionConfigTab } from "./SessionConfigTab";
 import { SessionCostsTab } from "./SessionCostsTab";
 import { SessionDAGTab } from "./SessionDAGTab";
+import { SessionPlanTab } from "./SessionPlanTab";
+import { SessionResultsTab } from "./SessionResultsTab";
 import { DAGHistoryView, DAGFilesView } from "@/components/dag";
 
 interface SessionDetailPanelProps {
@@ -30,10 +32,11 @@ interface SessionDetailPanelProps {
   onResume?: (sessionId: string, mode?: string) => void;
 }
 
-const tabs: { id: SessionDetailTab; label: string; icon: typeof Activity; needsRun?: boolean }[] = [
+const baseTabs: { id: SessionDetailTab; label: string; icon: typeof Activity; needsRun?: boolean }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "dag", label: "DAG", icon: GitBranch, needsRun: true },
   { id: "console", label: "Console", icon: Terminal, needsRun: true },
+  { id: "plan", label: "Plan", icon: FileText, needsRun: true },
+  { id: "dag", label: "DAG", icon: GitBranch, needsRun: true },
   { id: "events", label: "Events", icon: Activity, needsRun: true },
   { id: "costs", label: "Costs", icon: DollarSign, needsRun: true },
   { id: "files", label: "Files", icon: FileText, needsRun: true },
@@ -102,6 +105,16 @@ export function SessionDetailPanel({
   const modeClass = modeColors[detail.mode] || "bg-gray-500/20 text-gray-400 border-gray-500/30";
   const statusClass = statusColors[detail.status] || statusColors.expired;
   const selectedRun = runs.find((r) => r.id === selectedRunId);
+  const showResultsTab = detail.status === "completed" || selectedRun?.status === "completed";
+  const tabs = showResultsTab
+    ? [
+      baseTabs[0],
+      { id: "console" as SessionDetailTab, label: "Console", icon: Terminal, needsRun: true },
+      { id: "plan" as SessionDetailTab, label: "Plan", icon: FileText, needsRun: true },
+      { id: "results" as SessionDetailTab, label: "Results", icon: FileText, needsRun: true },
+      ...baseTabs.filter((t) => !["overview", "console", "plan"].includes(t.id)),
+    ]
+    : baseTabs;
 
   const noRunMessage = (
     <div className="flex items-center justify-center h-full text-gray-400">
@@ -192,18 +205,16 @@ export function SessionDetailPanel({
                       setSelectedRunId(run.id);
                       setRunDropdownOpen(false);
                     }}
-                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors ${
-                      run.id === selectedRunId ? "bg-gray-700" : ""
-                    }`}
+                    className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-700 transition-colors ${run.id === selectedRunId ? "bg-gray-700" : ""
+                      }`}
                   >
                     <div className="flex items-center justify-between">
                       <span className="text-gray-300 truncate">
                         {run.id.substring(0, 30)}...
                       </span>
                       <span
-                        className={`ml-2 px-1.5 py-0.5 rounded text-xs ${
-                          statusColors[run.status] || statusColors.expired
-                        }`}
+                        className={`ml-2 px-1.5 py-0.5 rounded text-xs ${statusColors[run.status] || statusColors.expired
+                          }`}
                       >
                         {run.status}
                       </span>
@@ -229,11 +240,10 @@ export function SessionDetailPanel({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors ${
-                activeTab === tab.id
-                  ? "text-blue-400 border-b-2 border-blue-400"
-                  : "text-gray-400 hover:text-gray-200"
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium whitespace-nowrap transition-colors ${activeTab === tab.id
+                ? "text-blue-400 border-b-2 border-blue-400"
+                : "text-gray-400 hover:text-gray-200"
+                }`}
             >
               <Icon className="w-3.5 h-3.5" />
               {tab.label}
@@ -248,6 +258,13 @@ export function SessionDetailPanel({
           <SessionOverview detail={detail} runs={runs} />
         )}
 
+        {activeTab === "results" &&
+          (selectedRunId ? (
+            <SessionResultsTab runId={selectedRunId} />
+          ) : (
+            noRunMessage
+          ))}
+
         {activeTab === "dag" &&
           (selectedRunId ? (
             <SessionDAGTab runId={selectedRunId} />
@@ -258,6 +275,13 @@ export function SessionDetailPanel({
         {activeTab === "console" &&
           (selectedRunId ? (
             <SessionConsoleTab runId={selectedRunId} />
+          ) : (
+            noRunMessage
+          ))}
+
+        {activeTab === "plan" &&
+          (selectedRunId ? (
+            <SessionPlanTab runId={selectedRunId} />
           ) : (
             noRunMessage
           ))}

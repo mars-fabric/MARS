@@ -44,6 +44,13 @@ from .langchain_tools import (
     get_langchain_web_tools,
     get_langchain_code_tools,
 )
+from .news_tools import (
+    announcements_noauth,
+    newsapi_search,
+    gnews_search,
+    rss_company_announcements,
+    prwire_search,
+)
 
 # New AG2 native interoperability functions
 try:
@@ -81,6 +88,13 @@ __all__ = [
     'get_langchain_file_tools',
     'get_langchain_web_tools',
     'get_langchain_code_tools',
+
+    # News and announcement tools
+    'announcements_noauth',
+    'newsapi_search',
+    'gnews_search',
+    'rss_company_announcements',
+    'prwire_search',
 ]
 
 # Add AG2 native interop functions if available

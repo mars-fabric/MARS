@@ -262,6 +262,53 @@ async def serve_image(path: str):
         raise HTTPException(status_code=500, detail=f"Error serving image: {str(e)}")
 
 
+@router.get("/find")
+async def find_file(directory: str, filename: str):
+    """Recursively search for a file by name within a directory."""
+    try:
+        if directory.startswith("~"):
+            directory = os.path.expanduser(directory)
+
+        abs_dir = os.path.abspath(directory)
+
+        if not os.path.exists(abs_dir) or not os.path.isdir(abs_dir):
+            raise HTTPException(status_code=404, detail="Directory not found")
+
+        # Sanitize filename to prevent path traversal
+        safe_filename = os.path.basename(filename)
+        if not safe_filename or safe_filename.startswith('.'):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+
+        matches = []
+        for root, dirs, files in os.walk(abs_dir):
+            for f in files:
+                if f == safe_filename:
+                    full_path = os.path.join(root, f)
+                    stat = os.stat(full_path)
+                    matches.append({
+                        "name": f,
+                        "path": full_path,
+                        "relative_path": os.path.relpath(full_path, abs_dir),
+                        "size": stat.st_size,
+                        "modified": stat.st_mtime,
+                    })
+
+        # Sort by modification time (newest first)
+        matches.sort(key=lambda x: x['modified'], reverse=True)
+
+        return {
+            "directory": abs_dir,
+            "filename": safe_filename,
+            "matches": matches,
+            "count": len(matches),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error finding file: {str(e)}")
+
+
 # Allowed extensions for file upload
 _UPLOAD_ALLOWED_EXTENSIONS = {
     '.csv', '.txt', '.md', '.json', '.fits', '.npy',

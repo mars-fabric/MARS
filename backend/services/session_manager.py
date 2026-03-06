@@ -430,12 +430,20 @@ class SessionManager:
             if mode:
                 query = query.filter(SessionState.mode == mode)
 
-            query = query.order_by(SessionState.updated_at.desc()).limit(limit)
+            # SessionState can contain multiple rows per session over time.
+            # Keep only the newest row per session so the UI reflects latest task state.
+            query = query.order_by(SessionState.updated_at.desc(), Session.created_at.desc())
 
             results = []
+            seen_sessions = set()
             for row in query.all():
+                session_id = row[0]
+                if session_id in seen_sessions:
+                    continue
+
+                seen_sessions.add(session_id)
                 results.append({
-                    "session_id": row[0],
+                    "session_id": session_id,
                     "name": row[1],
                     "created_at": row[2].isoformat() if row[2] else None,
                     "last_active_at": row[3].isoformat() if row[3] else None,
@@ -444,6 +452,9 @@ class SessionManager:
                     "current_phase": row[6],
                     "updated_at": row[7].isoformat() if row[7] else None,
                 })
+
+                if len(results) >= limit:
+                    break
 
             return results
 

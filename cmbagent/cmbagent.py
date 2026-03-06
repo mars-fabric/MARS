@@ -6,6 +6,7 @@ import requests
 import autogen
 import json
 import sys
+import re
 import pandas as pd
 import copy
 import datetime
@@ -13,7 +14,7 @@ from pathlib import Path
 import time
 import pickle
 from collections import defaultdict
-from openai import OpenAI
+from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError
 from typing import List, Dict, Any, Optional
 from .llm_provider import create_openai_client
 import glob
@@ -859,6 +860,13 @@ class CMBAgent:
 
         this_shared_context['work_dir'] = self.work_dir
 
+        # Provide defaults for agent template variables that may not be set
+        # by all phases. copilot_control is always loaded as a non-rag agent
+        # and its system message template uses these; without defaults,
+        # str.format() raises KeyError when autogen formats the template.
+        this_shared_context.setdefault('available_agents_info', '')
+        this_shared_context.setdefault('copilot_context', '{}')
+
         context_variables = ContextVariables(data=this_shared_context)
 
         # Create the pattern
@@ -870,12 +878,97 @@ class CMBAgent:
                                       "name": "main_cmbagent_chat"},
             )
 
-        chat_result, context_variables, last_agent = initiate_group_chat(
-            pattern=agent_pattern,
-            messages=this_shared_context['main_task'],
-            # user_agent=self.get_agent_from_name("admin"),
-            max_rounds = max_rounds,
-        )
+        # Retry with exponential backoff for transient OpenAI errors.
+        # For non-transient "request too large" TPM errors, compact the
+        # prompt between retries to avoid repeated hard failures.
+        max_retries = 5
+        base_delay = 3  # seconds
+        current_messages = this_shared_context['main_task']
+
+        def _compact_message_payload(message_payload):
+            """Shrink a large string payload while preserving core constraints."""
+            if not isinstance(message_payload, str):
+                return message_payload, False
+
+            original_len = len(message_payload)
+            if original_len <= 8000:
+                return message_payload, False
+
+            target_len = max(5000, int(original_len * 0.65))
+            if target_len >= original_len:
+                return message_payload, False
+
+            marker = (
+                "\n\n[Prompt compacted automatically due to model TPM input limits. "
+                "Preserve date filters, source verification, and output format.]\n\n"
+            )
+            head_len = int(target_len * 0.72)
+            tail_len = max(0, target_len - head_len - len(marker))
+
+            compacted = message_payload[:head_len] + marker
+            if tail_len > 0:
+                compacted += message_payload[-tail_len:]
+            return compacted, True
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                chat_result, context_variables, last_agent = initiate_group_chat(
+                    pattern=agent_pattern,
+                    messages=current_messages,
+                    # user_agent=self.get_agent_from_name("admin"),
+                    max_rounds = max_rounds,
+                )
+                break  # success
+            except (RateLimitError, APITimeoutError, APIConnectionError) as e:
+                error_text = str(e)
+                token_match = re.search(r"Limit\s+(\d+),\s+Requested\s+(\d+)", error_text)
+                is_request_too_large = (
+                    isinstance(e, RateLimitError)
+                    and "request too large" in error_text.lower()
+                    and "tokens per min" in error_text.lower()
+                )
+
+                if is_request_too_large:
+                    compacted_messages, did_compact = _compact_message_payload(current_messages)
+                    if did_compact:
+                        self.logger.warning(
+                            "OpenAI request too large; compacting prompt before retry "
+                            "(attempt %d/%d, chars %d -> %d)",
+                            attempt, max_retries, len(current_messages), len(compacted_messages)
+                        )
+                        if token_match:
+                            try:
+                                limit_tokens = int(token_match.group(1))
+                                requested_tokens = int(token_match.group(2))
+                                self.logger.warning(
+                                    "TPM limit exceeded (limit=%d requested=%d)",
+                                    limit_tokens, requested_tokens,
+                                )
+                            except Exception:
+                                pass
+
+                        current_messages = compacted_messages
+                        this_shared_context['main_task'] = compacted_messages
+                        try:
+                            context_variables['main_task'] = compacted_messages
+                        except Exception:
+                            pass
+
+                        # Immediate retry after compaction; waiting long does not help this error class.
+                        time.sleep(1)
+                        continue
+
+                if attempt == max_retries:
+                    self.logger.error(
+                        "OpenAI API error after %d attempts: %s", max_retries, e
+                    )
+                    raise
+                delay = base_delay * (2 ** (attempt - 1))  # 3, 6, 12, 24, 48s
+                self.logger.warning(
+                    "OpenAI API error (attempt %d/%d), retrying in %ds: %s",
+                    attempt, max_retries, delay, e,
+                )
+                time.sleep(delay)
 
         self.final_context = copy.deepcopy(context_variables)
 

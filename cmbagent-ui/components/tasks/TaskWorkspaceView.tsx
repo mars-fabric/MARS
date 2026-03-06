@@ -47,7 +47,7 @@ export default function TaskWorkspaceView({
             </span>
           </div>
           <div className="w-full bg-black/50 rounded-full h-2 overflow-hidden">
-            <div 
+            <div
               className="h-full bg-gradient-to-r from-blue-500 to-purple-500 transition-all duration-500"
               style={{ width: `${progressPercent}%` }}
             />
@@ -56,15 +56,14 @@ export default function TaskWorkspaceView({
             {dagData.nodes.map((node: any) => (
               <div
                 key={node.id}
-                className={`px-3 py-1 rounded-full text-xs font-medium ${
-                  node.status === 'completed'
+                className={`px-3 py-1 rounded-full text-xs font-medium ${node.status === 'completed'
                     ? 'bg-green-500/20 text-green-400'
                     : node.status === 'executing'
-                    ? 'bg-blue-500/20 text-blue-400 animate-pulse'
-                    : node.status === 'failed'
-                    ? 'bg-red-500/20 text-red-400'
-                    : 'bg-gray-500/20 text-gray-400'
-                }`}
+                      ? 'bg-blue-500/20 text-blue-400 animate-pulse'
+                      : node.status === 'failed'
+                        ? 'bg-red-500/20 text-red-400'
+                        : 'bg-gray-500/20 text-gray-400'
+                  }`}
               >
                 {node.name}
               </div>
@@ -74,7 +73,7 @@ export default function TaskWorkspaceView({
       )}
 
       {/* Workspace View */}
-      <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden">
+      <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg overflow-hidden h-full flex flex-col">
         {/* Header with Tabs and Collapse Button */}
         <div className="border-b border-white/10 p-4">
           <div className="flex items-center justify-between">
@@ -84,22 +83,20 @@ export default function TaskWorkspaceView({
               <div className="flex items-center space-x-2 bg-black/30 rounded-lg p-1">
                 <button
                   onClick={() => setWorkspaceView('dag')}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-md transition-all text-sm ${
-                    workspaceView === 'dag'
+                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-md transition-all text-sm ${workspaceView === 'dag'
                       ? 'bg-purple-500 text-white'
                       : 'text-gray-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Network className="w-4 h-4" />
                   <span>DAG View</span>
                 </button>
                 <button
                   onClick={() => setWorkspaceView('console')}
-                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-md transition-all text-sm ${
-                    workspaceView === 'console'
+                  className={`flex items-center space-x-2 px-3 py-1.5 rounded-md transition-all text-sm ${workspaceView === 'console'
                       ? 'bg-blue-500 text-white'
                       : 'text-gray-400 hover:text-white'
-                  }`}
+                    }`}
                 >
                   <Code className="w-4 h-4" />
                   <span>Console</span>
@@ -126,7 +123,7 @@ export default function TaskWorkspaceView({
 
         {/* Workspace Content */}
         {!isCollapsed && (
-          <div className="h-[600px]">
+          <div className="flex-1 min-h-0">
             {workspaceView === 'dag' ? (
               dagData ? (
                 <DAGWorkspace

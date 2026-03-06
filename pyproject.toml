@@ -18,8 +18,8 @@ license = "Apache-2.0"
 
 dependencies = [
     "pip",
-    "structlog",
     "google-genai",
+    "stuctlog",
     "anthropic",
     "mistralai",
     "ruamel.yaml",
@@ -52,6 +52,7 @@ dependencies = [
     "langchain-community>=0.0.20",
     "crewai[tools]>=0.1.0",
     "duckduckgo-search>=4.0.0",
+    "feedparser>=6.0.11",
     "wikipedia>=1.4.0",
     "arxiv>=2.0.0",
     

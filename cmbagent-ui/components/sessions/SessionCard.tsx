@@ -49,8 +49,8 @@ function getStatusLabel(status: string): string {
 
 function formatDuration(start: string | null | undefined, end?: string | null): string {
   if (!start) return ''
-  const startDate = new Date(start)
-  const endDate = end ? new Date(end) : new Date()
+  const startDate = parseSessionDate(start)
+  const endDate = end ? parseSessionDate(end) : new Date()
   const diffMs = endDate.getTime() - startDate.getTime()
   const diffMins = Math.floor(diffMs / 60000)
   if (diffMins < 1) return '<1m'
@@ -63,7 +63,7 @@ function formatDuration(start: string | null | undefined, end?: string | null): 
 
 function formatTimestamp(iso: string | null | undefined): string {
   if (!iso) return ''
-  const date = new Date(iso)
+  const date = parseSessionDate(iso)
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffMins = Math.floor(diffMs / 60000)
@@ -74,6 +74,12 @@ function formatTimestamp(iso: string | null | undefined): string {
   const diffDays = Math.floor(diffHours / 24)
   if (diffDays < 7) return `${diffDays}d ago`
   return date.toLocaleDateString()
+}
+
+function parseSessionDate(iso: string): Date {
+  // Treat timestamps without timezone suffix as UTC to avoid local-time skew.
+  const hasTimezone = /[zZ]|[+-]\d{2}:?\d{2}$/.test(iso)
+  return new Date(hasTimezone ? iso : `${iso}Z`)
 }
 
 export default function SessionCard({

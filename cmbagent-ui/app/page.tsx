@@ -18,6 +18,7 @@ import BottomPanel from '@/components/layout/BottomPanel'
 
 export default function Home() {
   const containerRef = useRef<HTMLDivElement>(null)
+  const resumeFromQueryHandledRef = useRef(false)
 
   // Local UI state
   const [selectedMode, setSelectedMode] = useState<string | null>(null)
@@ -418,6 +419,28 @@ export default function Home() {
       addConsoleOutput(`Failed to resume session: ${msg}`)
     }
   }
+
+  // Support resuming from /sessions page redirect: /?resumeSession=<id>&mode=<mode>
+  useEffect(() => {
+    if (resumeFromQueryHandledRef.current) return
+    if (typeof window === 'undefined') return
+
+    const params = new URLSearchParams(window.location.search)
+    const sessionId = params.get('resumeSession')
+    const mode = params.get('mode') || undefined
+
+    if (!sessionId) return
+
+    resumeFromQueryHandledRef.current = true
+
+      ; (async () => {
+        await handleResumeSessionFromList(sessionId, mode)
+
+        // Remove query params after attempting resume so refresh doesn't retrigger.
+        const nextUrl = `${window.location.pathname}${window.location.hash || ''}`
+        window.history.replaceState({}, document.title, nextUrl)
+      })()
+  }, [handleResumeSessionFromList])
 
   const handlePlayFromNode = async (nodeId: string) => {
     if (!currentRunId) {

@@ -16,8 +16,59 @@ import logging
 import structlog
 from typing import List, Dict, Any, Optional
 import warnings
+import re
+from .news_tools import newsapi_search, gnews_search, rss_company_announcements, prwire_search, announcements_noauth
 
 logger = structlog.get_logger(__name__)
+
+
+def _build_safe_duckduckgo_tool() -> Any:
+    """Create a resilient DuckDuckGo search tool that never raises network exceptions."""
+    from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
+
+    api_wrapper = DuckDuckGoSearchAPIWrapper()
+
+    def duckduckgo_search(query: str) -> str:
+        """Search the web using DuckDuckGo and return text results.
+
+        This wrapper catches transient upstream errors (including wikipedia/opensearch
+        failures surfaced by duckduckgo-search) and returns a non-fatal message so
+        agent workflows can continue.
+        """
+        if not query or not str(query).strip():
+            return "DuckDuckGo search skipped: empty query."
+
+        q = str(query).strip()
+        try:
+            return api_wrapper.run(q)
+        except Exception as first_err:
+            # Retry once with wildcard site filters removed, which can trigger
+            # brittle upstream behavior in some search backends.
+            simplified = re.sub(r"site:\S*\*\S*", "", q)
+            simplified = re.sub(r"\s+", " ", simplified).strip()
+
+            if simplified and simplified != q:
+                try:
+                    return api_wrapper.run(simplified)
+                except Exception as second_err:
+                    logger.warning(
+                        "duckduckgo_search_failed",
+                        query=q,
+                        simplified_query=simplified,
+                        error=str(second_err),
+                    )
+            else:
+                logger.warning("duckduckgo_search_failed", query=q, error=str(first_err))
+
+            return (
+                "DuckDuckGo search temporarily unavailable due to upstream network "
+                "errors. Continue with other sources/tools and retry later with a "
+                "simpler query."
+            )
+
+    duckduckgo_search.__name__ = "duckduckgo_search"
+    duckduckgo_search.__doc__ = "Search DuckDuckGo for web results by query string."
+    return duckduckgo_search
 
 try:
     from autogen.interop import Interoperability
@@ -39,7 +90,25 @@ class AG2FreeToolsLoader:
         self.loaded_tools = {
             'langchain': [],
             'crewai': [],
+            'news': [],
         }
+
+    def load_news_tools(self) -> List[Any]:
+        """Load structured news and announcement retrieval tools."""
+        tools = [
+            announcements_noauth,
+            newsapi_search,
+            gnews_search,
+            rss_company_announcements,
+            prwire_search,
+        ]
+        self.loaded_tools['news'] = tools
+        logger.info("tool_loaded", tool="Announcements NoAuth (RSS)")
+        logger.info("tool_loaded", tool="NewsAPI")
+        logger.info("tool_loaded", tool="GNews")
+        logger.info("tool_loaded", tool="Official RSS Announcements")
+        logger.info("tool_loaded", tool="PR Wire RSS")
+        return tools
 
     def load_langchain_tools(self, tool_names: Optional[List[str]] = None) -> List[Any]:
         """
@@ -66,13 +135,7 @@ class AG2FreeToolsLoader:
         # DuckDuckGo Search (FREE - no API key needed)
         if tool_names is None or 'duckduckgo' in tool_names:
             try:
-                from langchain_community.tools import DuckDuckGoSearchRun
-                from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
-
-                api_wrapper = DuckDuckGoSearchAPIWrapper()
-                langchain_tool = DuckDuckGoSearchRun(api_wrapper=api_wrapper)
-                ag2_tool = self.interop.convert_tool(tool=langchain_tool, type="langchain")
-                tools.append(ag2_tool)
+                tools.append(_build_safe_duckduckgo_tool())
                 logger.info("tool_loaded", tool="DuckDuckGo Search")
             except ImportError as e:
                 logger.warning("tool_load_failed", tool="DuckDuckGo", error=str(e), install_hint="pip install duckduckgo-search")
@@ -397,11 +460,21 @@ class AG2FreeToolsLoader:
         logger.info("loading_tools", framework="CrewAI")
         crewai_tools = self.load_crewai_tools()
 
-        logger.info("all_tools_loaded", langchain_count=len(langchain_tools), crewai_count=len(crewai_tools), total=len(langchain_tools) + len(crewai_tools))
+        logger.info("loading_tools", framework="News")
+        news_tools = self.load_news_tools()
+
+        logger.info(
+            "all_tools_loaded",
+            langchain_count=len(langchain_tools),
+            crewai_count=len(crewai_tools),
+            news_count=len(news_tools),
+            total=len(langchain_tools) + len(crewai_tools) + len(news_tools),
+        )
 
         return {
             'langchain': langchain_tools,
             'crewai': crewai_tools,
+            'news': news_tools,
         }
 
     def get_combined_tool_list(self) -> List[Any]:
@@ -411,7 +484,7 @@ class AG2FreeToolsLoader:
         Returns:
             List of all AG2-converted tools
         """
-        return self.loaded_tools['langchain'] + self.loaded_tools['crewai']
+        return self.loaded_tools['langchain'] + self.loaded_tools['crewai'] + self.loaded_tools['news']
 
 
 # Convenience functions

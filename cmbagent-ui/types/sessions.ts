@@ -39,6 +39,8 @@ export interface SessionRun {
 
 export type SessionDetailTab =
   | "overview"
+  | "results"
+  | "plan"
   | "dag"
   | "console"
   | "events"

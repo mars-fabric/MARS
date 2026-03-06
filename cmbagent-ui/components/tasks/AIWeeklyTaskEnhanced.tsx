@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { ArrowLeft, Calendar, Tags, Globe, Sparkles, Download, Loader2, Code, MessageSquare, FileText, Settings, CheckCircle2, AlertCircle } from 'lucide-react'
 import { getApiUrl, config } from '@/lib/config'
 import { useWebSocketContext } from '@/contexts/WebSocketContext'
@@ -32,6 +32,7 @@ export default function AIWeeklyTaskEnhanced({ onBack }: AIWeeklyTaskEnhancedPro
 
   const [taskId, setTaskId] = useState<string | null>(null)
   const [result, setResult] = useState<any>(null)
+  const [isReportDownloadReady, setIsReportDownloadReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showView, setShowView] = useState<'config' | 'execution'>('config')
   const [activeRightTab, setActiveRightTab] = useState<'console' | 'plan' | 'results'>('console')
@@ -53,6 +54,7 @@ export default function AIWeeklyTaskEnhanced({ onBack }: AIWeeklyTaskEnhancedPro
   }>({ feedback: '', modifications: '' })
 
   // Post-execution state
+  const fetchStartedRef = useRef(false)
   const [showPostExecution, setShowPostExecution] = useState(false)
   const [postExecutionFeedback, setPostExecutionFeedback] = useState('')
   const [isRestarting, setIsRestarting] = useState(false)
@@ -65,9 +67,9 @@ export default function AIWeeklyTaskEnhanced({ onBack }: AIWeeklyTaskEnhancedPro
   })
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().split('T')[0])
   const [topics, setTopics] = useState<string[]>(['llm', 'cv'])
-  const [sources, setSources] = useState<string[]>(['arxiv', 'github', 'blogs'])
+  const [sources, setSources] = useState<string[]>(['github', 'press-releases', 'company-announcements', 'major-releases'])
   const [style, setStyle] = useState<'concise' | 'detailed' | 'technical'>('concise')
-  
+
   // Advanced options
   const [reportAudience, setReportAudience] = useState<string>('technical-and-non-technical')
   const [reportTone, setReportTone] = useState<string>('professional')
@@ -84,9 +86,10 @@ export default function AIWeeklyTaskEnhanced({ onBack }: AIWeeklyTaskEnhancedPro
   ]
 
   const availableSources = [
-    { id: 'arxiv', label: 'ArXiv Papers' },
     { id: 'github', label: 'GitHub Releases' },
-    { id: 'blogs', label: 'Tech Blogs' }
+    { id: 'press-releases', label: 'Press Releases' },
+    { id: 'company-announcements', label: 'Company Announcements' },
+    { id: 'major-releases', label: 'Major Product/Model Releases' }
   ]
 
   const toggleTopic = (topicId: string) => {
@@ -104,6 +107,24 @@ export default function AIWeeklyTaskEnhanced({ onBack }: AIWeeklyTaskEnhancedPro
         : [...prev, sourceId]
     )
   }
+
+  const gatedDagData = useMemo(() => {
+    if (!dagData?.nodes?.length) return dagData
+    if (isReportDownloadReady) return dagData
+
+    const nodes = [...dagData.nodes]
+    const lastIndex = nodes.length - 1
+    const lastNode = nodes[lastIndex]
+
+    if (lastNode?.status === 'completed') {
+      nodes[lastIndex] = {
+        ...lastNode,
+        status: isRunning ? 'executing' : 'pending'
+      }
+    }
+
+    return { ...dagData, nodes }
+  }, [dagData, isReportDownloadReady, isRunning])
 
   // Context enrichment questions
   const generateEnrichmentQuestions = () => {
@@ -175,8 +196,14 @@ REPORT TONE: ${reportTone}
       return
     }
 
+    if (!dateFrom || !dateTo || dateFrom > dateTo) {
+      setError('Please select a valid date range (From must be on or before To)')
+      return
+    }
+
     setError(null)
     setResult(null)
+    setIsReportDownloadReady(false)
     clearConsole()
     setShowView('execution')
     setActiveRightTab('console')
@@ -184,7 +211,7 @@ REPORT TONE: ${reportTone}
     try {
       const taskId = `ai-weekly_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       setTaskId(taskId)
-      
+
       const reportFilename = `ai_weekly_report_${dateFrom}_to_${dateTo}.md`
 
       addConsoleOutput(`✅ Task created: ${taskId}`)
@@ -193,10 +220,10 @@ REPORT TONE: ${reportTone}
       addConsoleOutput(`📰 Sources: ${sources.join(', ')}`)
       addConsoleOutput(`🎯 Enhanced with user context`)
       addConsoleOutput(``)
-      
+
       setIsRunning(true)
       addConsoleOutput(`🚀 Connecting to workflow engine with HITL enabled...`)
-      
+
       // Create enhanced task description with context enrichment
       const basePrompt = `Generate a Professional AI Weekly Report for organization-wide distribution covering ${dateFrom} to ${dateTo}.
 
@@ -211,19 +238,40 @@ Report style: ${style}
 ${contextEnrichment.enrichedPrompt}
 
 Task Requirements:
-1. CRITICAL: Use web search tools and ArXiv API to find REAL, RECENT, HIGH-QUALITY content
-2. ALL links must be ACTUAL working URLs - NO placeholder links
-3. Search ArXiv for significant papers published between ${dateFrom} and ${dateTo}
-4. Search GitHub for trending repos and major releases in AI
-5. Search authoritative tech news sources
-6. Each topic must have 5 SIGNIFICANT items with working source links
-7. Write in professional ${style} style with clear, concise explanations
-8. Include context and business implications for each item
+1. CRITICAL: Use web search tools to find REAL, RECENT, HIGH-QUALITY content
+2. CRITICAL DATE FILTER: ONLY include items with publication/announcement/release dates in this inclusive window: ${dateFrom} to ${dateTo}
+3. Date filtering is INCLUSIVE (include both boundary dates ${dateFrom} and ${dateTo})
+4. Reject any item outside the date range, even if highly relevant
+5. Every item must show an explicit date in YYYY-MM-DD format
+6. Add this exact line near the top of the report: "Coverage Window (Inclusive): ${dateFrom} to ${dateTo}"
+7. Target at least 10 items combined from press releases, company announcements, and major releases; if fewer are available in-range, include the best available verified items and explicitly note the gap
+8. If 'press-releases' is selected, prioritize official newsroom/press pages and include as many in-range items as available
+9. If 'company-announcements' is selected, prioritize official company announcement/blog channels and include as many in-range items as available
+10. If 'major-releases' is selected, prioritize official release notes/changelogs/product launch pages and include as many in-range items as available
+11. Keep source diversity: do not let the report be dominated by a single source type
+12. ALL links must be ACTUAL working URLs - NO placeholder links
+13. Prefer primary sources first (official company pages, release notes, newsroom posts), then supporting analysis
+14. Do NOT use archive-style sources (no arxiv.org papers, no archive.org links, no historical retrospective datasets)
+15. Focus ONLY on latest releases and official company release channels in the selected date window
+16. Date coverage rule: include items across multiple dates in the range, not a single day only
+17. Boundary coverage rule: include at least one item from ${dateFrom} and one from ${dateTo} when available; if unavailable, state this explicitly and include nearest in-range dates
+18. Search GitHub for trending repos and major releases in AI
+19. Search official press releases and company announcements for AI launches and updates
+20. Search for major model/tool/platform releases announced in the date range
+21. Use tool priority for announcements: announcements_noauth first (keyless RSS coverage), then rss_company_announcements, then newsapi_search, then gnews_search, then prwire_search
+22. If a tool fails, continue with remaining tools; do not stop report generation
+23. Each topic should target up to 5 significant items with working source links; if fewer exist in-range, include available verified items and explicitly document the shortfall
+24. Write in professional ${style} style with clear, concise explanations
+25. Include context and business implications for each item
+26. For announcement tools, run a broad pass first (use announcements_noauth with an empty or very short query) to collect in-range items, then run focused queries to refine
+27. Always attempt source-specific passes when needed: rss_company_announcements for openai, google, microsoft, meta, anthropic, and nvidia
+28. Never output a blank template or "no data" report if in-range items were found by tools; include the verified items you have and clearly label any shortfalls
 
 Required Report Structure:
 - Executive Summary
 - Key Highlights (5 items)
-- Research & Innovation (5 items)
+- Press Releases & Company Announcements (5 items)
+- Major Releases (5 items)
 - Product Launches & Tools (5 items)
 - Technical Breakthroughs by Category (5 per topic)
 - Industry & Business News (5 items)
@@ -231,40 +279,44 @@ Required Report Structure:
 - Quick Reference Table
 
 FILE OUTPUT REQUIREMENTS (CRITICAL):
-- Save the final report as: "${reportFilename}"
-- Use Python's open() function or write_file tool
+- Save the final report to this EXACT ABSOLUTE PATH: "/home/ravi.khapra/MARS/backend/${reportFilename}"
+- Use Python's open() function with the absolute path above
+- Example: with open("/home/ravi.khapra/MARS/backend/${reportFilename}", "w") as f: f.write(report)
 - Markdown format with proper headers
-- Print confirmation: print(f"Report saved to: {os.path.abspath('${reportFilename}')}")
+- Print confirmation after saving: print(f"Report saved to: /home/ravi.khapra/MARS/backend/${reportFilename}")
 
 ${specificFocus ? `\nSPECIFIC FOCUS: ${specificFocus}` : ''}
 ${excludeTopics ? `\nEXCLUDE: ${excludeTopics}` : ''}
 `
-      
+
       // Create config with HITL enabled
       const taskConfig = {
         mode: 'planning-control',
-        model: 'gpt-4o',
-        plannerModel: 'gpt-4o',
-        researcherModel: 'gpt-4.1-2025-04-14',
-        engineerModel: 'gpt-4o',
-        planReviewerModel: 'o3-mini-2025-01-31',
-        defaultModel: 'gpt-4.1-2025-04-14',
-        defaultFormatterModel: 'o3-mini-2025-01-31',
-        maxRounds: 25,
+        model: 'gpt-5',
+        plannerModel: 'gpt-5',
+        researcherModel: 'gpt-5',
+        engineerModel: 'gpt-5',
+        planReviewerModel: 'gpt-5',
+        defaultModel: 'gpt-5',
+        defaultFormatterModel: 'gpt-5',
+        maxRounds: 18,
         maxAttempts: 6,
         maxPlanSteps: 3,
         nPlanReviews: 1,
         planInstructions: 'Use researcher to gather information from specified sources, then use engineer to analyze and write the report.',
         agent: 'planner',
         workDir: config.workDir,
-        // Enable HITL
-        approvalMode: 'after_planning',  // Request approval after plan is created
+        // Tell backend to copy final report to the backend/ directory
+        reportOutputDir: '/home/ravi.khapra/MARS/backend',
+        reportFilenamePattern: `ai_weekly_report_${dateFrom}_to_${dateTo}.md`,
+        // Disable mandatory approval pauses so report generation proceeds end-to-end.
+        approvalMode: 'never',
         requireApprovalBeforeSteps: false,
-        enableManualControl: true
+        enableManualControl: false
       }
-      
+
       await connect(taskId, basePrompt, taskConfig)
-      
+
     } catch (err: any) {
       setError(err.message)
       addConsoleOutput(`❌ Error: ${err.message}`)
@@ -299,12 +351,42 @@ ${excludeTopics ? `\nEXCLUDE: ${excludeTopics}` : ''}
     addConsoleOutput(approved ? '✅ Plan approved, continuing execution...' : '❌ Plan rejected')
   }
 
-  const downloadReport = () => {
+  const downloadReport = async () => {
     if (!result) return
-    
-    // If we have the full report content, download it
-    if (result.fullReport) {
-      const blob = new Blob([result.fullReport], { type: 'text/markdown' })
+
+    let content = result.fullReport
+
+    // If we don't have content yet, try fetching it from the backend
+    if (!content && result.path) {
+      try {
+        const contentRes = await fetch(getApiUrl(`/api/files/content?path=${encodeURIComponent(result.path)}`))
+        const contentData = await contentRes.json()
+        if (contentData.content) {
+          content = contentData.content
+          setResult({ ...result, fullReport: content })
+          setIsReportDownloadReady(true)
+        }
+      } catch {
+        // Also try searching in backend directory
+        try {
+          const reportFilename = result.filename || `ai_weekly_report_${dateFrom}_to_${dateTo}.md`
+          const findRes = await fetch(getApiUrl(`/api/files/find?directory=${encodeURIComponent('/home/ravi.khapra/MARS/backend')}&filename=${encodeURIComponent(reportFilename)}`))
+          const findData = await findRes.json()
+          if (findData.count > 0) {
+            const contentRes = await fetch(getApiUrl(`/api/files/content?path=${encodeURIComponent(findData.matches[0].path)}`))
+            const contentData = await contentRes.json()
+            if (contentData.content) {
+              content = contentData.content
+              setResult({ ...result, fullReport: content, path: findData.matches[0].path })
+              setIsReportDownloadReady(true)
+            }
+          }
+        } catch { /* ignore */ }
+      }
+    }
+
+    if (content) {
+      const blob = new Blob([content], { type: 'text/markdown' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
@@ -314,9 +396,7 @@ ${excludeTopics ? `\nEXCLUDE: ${excludeTopics}` : ''}
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
     } else {
-      // Inform user where to find the file
-      addConsoleOutput(`📥 Report file location: ${result.path}`)
-      addConsoleOutput(`💡 Check the DAG Files tab to download the report`)
+      addConsoleOutput(`⚠️ Report file not available for download yet. Location: ${result.path}`)
     }
   }
 
@@ -340,7 +420,7 @@ The report has been generated, but needs the following modifications:
 ${postExecutionFeedback}
 
 Please regenerate the report incorporating these changes while maintaining all other requirements.`
-      
+
       setContextEnrichment(prev => ({
         ...prev,
         enrichedPrompt: modifiedPrompt
@@ -348,7 +428,7 @@ Please regenerate the report incorporating these changes while maintaining all o
 
       addConsoleOutput('🔄 Restarting workflow with modifications...')
       addConsoleOutput(`📝 Modification request: ${postExecutionFeedback}`)
-      
+
       await startWorkflowWithEnrichment()
     } catch (err: any) {
       setError(err.message)
@@ -359,41 +439,144 @@ Please regenerate the report incorporating these changes while maintaining all o
     }
   }
 
-  // Monitor workflow completion and fetch report
+  // Download report as PDF using html2pdf.js
+  const downloadReportAsPdf = async () => {
+    if (!result) return
+
+    let content = result.fullReport
+
+    // If we don't have content yet, try fetching it
+    if (!content && result.path) {
+      try {
+        const contentRes = await fetch(getApiUrl(`/api/files/content?path=${encodeURIComponent(result.path)}`))
+        const contentData = await contentRes.json()
+        if (contentData.content) {
+          content = contentData.content
+          setResult({ ...result, fullReport: content })
+        }
+      } catch { /* ignore */ }
+    }
+
+    if (!content) {
+      addConsoleOutput(`⚠️ Report content not available for PDF conversion yet.`)
+      return
+    }
+
+    try {
+      const html2pdf = (await import('html2pdf.js')).default
+
+      // Convert markdown to styled HTML
+      const htmlContent = content
+        .replace(/^### (.*$)/gm, '<h3 style="color:#1a1a2e;margin-top:18px;margin-bottom:8px;">$1</h3>')
+        .replace(/^## (.*$)/gm, '<h2 style="color:#16213e;margin-top:24px;margin-bottom:10px;">$1</h2>')
+        .replace(/^# (.*$)/gm, '<h1 style="color:#0f3460;margin-top:30px;margin-bottom:12px;">$1</h1>')
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.*?)\*/g, '<em>$1</em>')
+        .replace(/^- (.*$)/gm, '<li style="margin-left:20px;">$1</li>')
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" style="color:#2563eb;">$1</a>')
+        .replace(/\n{2,}/g, '<br/><br/>')
+        .replace(/\n/g, '<br/>')
+
+      const wrapper = document.createElement('div')
+      wrapper.innerHTML = `<div style="font-family:Arial,sans-serif;font-size:11px;line-height:1.6;color:#222;padding:20px;">${htmlContent}</div>`
+
+      const opt = {
+        margin: [10, 10, 10, 10] as [number, number, number, number],
+        filename: result.filename?.replace('.md', '.pdf') || `ai-weekly-report-${dateFrom}-to-${dateTo}.pdf`,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
+      }
+
+      await html2pdf().set(opt).from(wrapper).save()
+      addConsoleOutput('📥 PDF downloaded successfully!')
+    } catch (err: any) {
+      addConsoleOutput(`⚠️ PDF download failed: ${err.message}`)
+    }
+  }
+
+  // Fetch report after workflow completion
   useEffect(() => {
-    if (results?.work_dir && !result && !isRunning) {
+    if (results?.work_dir && !result && !isRunning && !fetchStartedRef.current) {
+      fetchStartedRef.current = true
+
       const fetchReport = async () => {
         try {
           addConsoleOutput(`🔍 Searching for generated report file...`)
           const reportFilename = `ai_weekly_report_${dateFrom}_to_${dateTo}.md`
-          const reportPath = `${results.work_dir}/${reportFilename}`
-          
-          // Try to read the report file (this would need a backend endpoint to read files)
-          // For now, set a placeholder that the report is available in the work directory
-          addConsoleOutput(`📄 Report should be available at: ${reportPath}`)
-          
-          // Set result to indicate completion
-          setResult({
-            fullReport: `Report generated successfully!\n\nFile location: ${reportPath}\n\nTo view the full report, please check the work directory or download it from the files section.`,
-            filename: reportFilename,
-            path: reportPath
-          })
-          
+
+          // Search in the backend directory first (where the prompt tells the agent to save)
+          const backendDir = '/home/ravi.khapra/MARS/backend'
+          let findData = { count: 0, matches: [] as any[] }
+
+          const backendRes = await fetch(getApiUrl(`/api/files/find?directory=${encodeURIComponent(backendDir)}&filename=${encodeURIComponent(reportFilename)}`))
+          findData = await backendRes.json()
+
+          // Fallback: search recursively in the task work directory
+          if (findData.count === 0) {
+            const taskRes = await fetch(getApiUrl(`/api/files/find?directory=${encodeURIComponent(results.work_dir)}&filename=${encodeURIComponent(reportFilename)}`))
+            findData = await taskRes.json()
+          }
+
+          if (findData.count > 0) {
+            const foundPath = findData.matches[0].path
+            addConsoleOutput(`📄 Found report at: ${foundPath}`)
+
+            // Read the actual file content
+            const contentRes = await fetch(getApiUrl(`/api/files/content?path=${encodeURIComponent(foundPath)}`))
+            const contentData = await contentRes.json()
+
+            if (contentData.content) {
+              setResult({
+                fullReport: contentData.content,
+                filename: reportFilename,
+                path: foundPath
+              })
+              setIsReportDownloadReady(true)
+              addConsoleOutput(`✅ Report loaded successfully (${(contentData.size / 1024).toFixed(1)} KB)`)
+            } else {
+              setResult({
+                fullReport: null,
+                filename: reportFilename,
+                path: foundPath
+              })
+              addConsoleOutput(`⚠️ Report found but could not read content`)
+            }
+          } else {
+            addConsoleOutput(`⚠️ Report file not found in task directory. It may still be generating.`)
+            setResult({
+              fullReport: null,
+              filename: reportFilename,
+              path: `${results.work_dir}/${reportFilename}`
+            })
+          }
+
           setActiveRightTab('results')
         } catch (err: any) {
           addConsoleOutput(`⚠️ Could not load report: ${err.message}`)
+          fetchStartedRef.current = false
         }
       }
-      
+
       fetchReport()
     }
-    
+  }, [results, result, isRunning, dateFrom, dateTo])
+
+  // Reset fetch guard when a new run starts
+  useEffect(() => {
+    if (isRunning) {
+      fetchStartedRef.current = false
+    }
+  }, [isRunning])
+
+  // Monitor workflow completion
+  useEffect(() => {
     if (connected && currentRunId && consoleOutput.length > 0 && isRunning) {
       const lastLog = consoleOutput[consoleOutput.length - 1]
-      if (lastLog.includes('✅ Task execution completed') || 
-          lastLog.includes('✅ Workflow completed') ||
-          lastLog.includes('🎉 Workflow complete') ||
-          lastLog.includes('✅ Task completed')) {
+      if (lastLog.includes('✅ Task execution completed') ||
+        lastLog.includes('✅ Workflow completed') ||
+        lastLog.includes('🎉 Workflow complete') ||
+        lastLog.includes('✅ Task completed')) {
         setTimeout(() => {
           setIsRunning(false)
           if (!showPostExecution) {
@@ -402,7 +585,7 @@ Please regenerate the report incorporating these changes while maintaining all o
         }, 2000)
       }
     }
-  }, [consoleOutput, connected, currentRunId, isRunning, results, result, showPostExecution, dateFrom, dateTo])
+  }, [consoleOutput, connected, currentRunId, isRunning, showPostExecution])
 
   return (
     <div className="min-h-screen p-6 pb-24">
@@ -448,7 +631,7 @@ Please regenerate the report incorporating these changes while maintaining all o
                       <Settings className="w-5 h-5 text-blue-400" />
                       Additional Preferences
                     </h3>
-                    
+
                     <div className="space-y-4">
                       <div>
                         <label className="block text-gray-300 text-sm mb-2">Specific Focus Areas (optional)</label>
@@ -627,7 +810,7 @@ Please regenerate the report incorporating these changes while maintaining all o
                     Request Modifications (Optional)
                   </h3>
                   <p className="text-gray-400 text-sm mb-4">
-                    If you'd like to adjust the report content, describe the changes you want. 
+                    If you'd like to adjust the report content, describe the changes you want.
                     The workflow will restart with your modifications while keeping the base structure intact.
                   </p>
                   <textarea
@@ -699,181 +882,178 @@ Please regenerate the report incorporating these changes while maintaining all o
               {/* Left Panel - Configuration */}
               <div className="space-y-6">
 
-              {error && (
-                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400">
-                  {error}
-                </div>
-              )}
-
-              {/* Date Range */}
-              <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Calendar className="w-5 h-5 text-blue-400" />
-                  <h2 className="text-lg font-semibold text-white">Date Range</h2>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">From</label>
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                    />
+                {error && (
+                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-red-400">
+                    {error}
                   </div>
-                  <div>
-                    <label className="block text-sm text-gray-400 mb-2">To</label>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
-                    />
+                )}
+
+                {/* Date Range */}
+                <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <Calendar className="w-5 h-5 text-blue-400" />
+                    <h2 className="text-lg font-semibold text-white">Date Range</h2>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">From</label>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        onChange={(e) => setDateFrom(e.target.value)}
+                        className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm text-gray-400 mb-2">To</label>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        onChange={(e) => setDateTo(e.target.value)}
+                        className="w-full px-4 py-2 bg-black/50 border border-white/10 rounded-lg text-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all"
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Topics */}
-              <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Tags className="w-5 h-5 text-green-400" />
-                  <h2 className="text-lg font-semibold text-white">Topics</h2>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {availableTopics.map(topic => (
-                    <button
-                      key={topic.id}
-                      onClick={() => toggleTopic(topic.id)}
-                      className={`px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                        topics.includes(topic.id)
+                {/* Topics */}
+                <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <Tags className="w-5 h-5 text-green-400" />
+                    <h2 className="text-lg font-semibold text-white">Topics</h2>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {availableTopics.map(topic => (
+                      <button
+                        key={topic.id}
+                        onClick={() => toggleTopic(topic.id)}
+                        className={`px-4 py-3 rounded-lg text-sm font-medium transition-all ${topics.includes(topic.id)
                           ? 'bg-green-500 text-black'
                           : 'bg-black/50 text-gray-400 hover:text-white border border-white/10'
-                      }`}
-                    >
-                      {topic.label}
-                    </button>
-                  ))}
+                          }`}
+                      >
+                        {topic.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Sources */}
-              <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
-                <div className="flex items-center space-x-2 mb-4">
-                  <Globe className="w-5 h-5 text-purple-400" />
-                  <h2 className="text-lg font-semibold text-white">Sources</h2>
-                </div>
-                <div className="grid grid-cols-1 gap-3">
-                  {availableSources.map(source => (
-                    <button
-                      key={source.id}
-                      onClick={() => toggleSource(source.id)}
-                      className={`px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                        sources.includes(source.id)
+                {/* Sources */}
+                <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
+                  <div className="flex items-center space-x-2 mb-4">
+                    <Globe className="w-5 h-5 text-purple-400" />
+                    <h2 className="text-lg font-semibold text-white">Sources</h2>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3">
+                    {availableSources.map(source => (
+                      <button
+                        key={source.id}
+                        onClick={() => toggleSource(source.id)}
+                        className={`px-4 py-3 rounded-lg text-sm font-medium transition-all ${sources.includes(source.id)
                           ? 'bg-purple-500 text-white'
                           : 'bg-black/50 text-gray-400 hover:text-white border border-white/10'
-                      }`}
-                    >
-                      {source.label}
-                    </button>
-                  ))}
+                          }`}
+                      >
+                        {source.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Style */}
-              <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
-                <h2 className="text-lg font-semibold text-white">Report Style</h2>
-                <div className="grid grid-cols-3 gap-3">
-                  {(['concise', 'detailed', 'technical'] as const).map(s => (
-                    <button
-                      key={s}
-                      onClick={() => setStyle(s)}
-                      className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${
-                        style === s
+                {/* Style */}
+                <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6 space-y-4">
+                  <h2 className="text-lg font-semibold text-white">Report Style</h2>
+                  <div className="grid grid-cols-3 gap-3">
+                    {(['concise', 'detailed', 'technical'] as const).map(s => (
+                      <button
+                        key={s}
+                        onClick={() => setStyle(s)}
+                        className={`flex-1 px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${style === s
                           ? 'bg-yellow-500 text-black'
                           : 'bg-black/50 text-gray-400 hover:text-white border border-white/10'
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
+                          }`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {/* Generate Button */}
+                <button
+                  onClick={handleGenerate}
+                  disabled={isRunning}
+                  className="w-full px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-600 text-white font-semibold rounded-lg transition-all disabled:cursor-not-allowed flex items-center justify-center space-x-2"
+                >
+                  {isRunning ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      <span>Generating Report...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5" />
+                      <span>Generate Weekly Report</span>
+                    </>
+                  )}
+                </button>
               </div>
 
-              {/* Generate Button */}
-              <button
-                onClick={handleGenerate}
-                disabled={isRunning}
-                className="w-full px-6 py-4 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 disabled:from-gray-500 disabled:to-gray-600 text-white font-semibold rounded-lg transition-all disabled:cursor-not-allowed flex items-center justify-center space-x-2"
-              >
-                {isRunning ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span>Generating Report...</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-5 h-5" />
-                    <span>Generate Weekly Report</span>
-                  </>
-                )}
-              </button>
+              {/* Right Panel - Preview */}
+              <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-semibold text-white">What You'll Get</h2>
+                </div>
+
+                <div className="space-y-4 text-gray-300">
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0 mt-1">
+                      <span className="text-blue-400 text-sm font-semibold">1</span>
+                    </div>
+                    <div>
+                      <h3 className="text-white font-medium mb-1">Context Enrichment</h3>
+                      <p className="text-sm text-gray-400">Answer a few questions to tailor the report to your needs</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0 mt-1">
+                      <span className="text-green-400 text-sm font-semibold">2</span>
+                    </div>
+                    <div>
+                      <h3 className="text-white font-medium mb-1">Plan Review</h3>
+                      <p className="text-sm text-gray-400">Review and approve the execution plan before proceeding</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0 mt-1">
+                      <span className="text-purple-400 text-sm font-semibold">3</span>
+                    </div>
+                    <div>
+                      <h3 className="text-white font-medium mb-1">Real-time Progress</h3>
+                      <p className="text-sm text-gray-400">Watch the workflow execute with live console and DAG view</p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center flex-shrink-0 mt-1">
+                      <span className="text-yellow-400 text-sm font-semibold">4</span>
+                    </div>
+                    <div>
+                      <h3 className="text-white font-medium mb-1">Final Report</h3>
+                      <p className="text-sm text-gray-400">Comprehensive AI weekly digest ready for distribution</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-4 mt-4">
+                    <p className="text-xs text-gray-500">
+                      This workflow includes Human-in-the-Loop (HITL) integration for full control over the report generation process.
+                    </p>
+                  </div>
+                </div>
+              </div>
             </div>
-
-            {/* Right Panel - Preview */}
-            <div className="bg-black/30 backdrop-blur-sm border border-white/10 rounded-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">What You'll Get</h2>
-              </div>
-
-              <div className="space-y-4 text-gray-300">
-                <div className="flex items-start space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0 mt-1">
-                    <span className="text-blue-400 text-sm font-semibold">1</span>
-                  </div>
-                  <div>
-                    <h3 className="text-white font-medium mb-1">Context Enrichment</h3>
-                    <p className="text-sm text-gray-400">Answer a few questions to tailor the report to your needs</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center flex-shrink-0 mt-1">
-                    <span className="text-green-400 text-sm font-semibold">2</span>
-                  </div>
-                  <div>
-                    <h3 className="text-white font-medium mb-1">Plan Review</h3>
-                    <p className="text-sm text-gray-400">Review and approve the execution plan before proceeding</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-purple-500/20 flex items-center justify-center flex-shrink-0 mt-1">
-                    <span className="text-purple-400 text-sm font-semibold">3</span>
-                  </div>
-                  <div>
-                    <h3 className="text-white font-medium mb-1">Real-time Progress</h3>
-                    <p className="text-sm text-gray-400">Watch the workflow execute with live console and DAG view</p>
-                  </div>
-                </div>
-
-                <div className="flex items-start space-x-3">
-                  <div className="w-8 h-8 rounded-full bg-yellow-500/20 flex items-center justify-center flex-shrink-0 mt-1">
-                    <span className="text-yellow-400 text-sm font-semibold">4</span>
-                  </div>
-                  <div>
-                    <h3 className="text-white font-medium mb-1">Final Report</h3>
-                    <p className="text-sm text-gray-400">Comprehensive AI weekly digest ready for distribution</p>
-                  </div>
-                </div>
-
-                <div className="border-t border-white/10 pt-4 mt-4">
-                  <p className="text-xs text-gray-500">
-                    This workflow includes Human-in-the-Loop (HITL) integration for full control over the report generation process.
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
           </>
         ) : (
           /* Execution View with 3 Tabs */
@@ -922,7 +1102,7 @@ Please regenerate the report incorporating these changes while maintaining all o
               {/* Left Side - Workspace */}
               <div className="min-h-0">
                 <TaskWorkspaceView
-                  dagData={dagData}
+                  dagData={gatedDagData}
                   currentRunId={currentRunId || undefined}
                   consoleOutput={consoleOutput}
                   costSummary={costSummary}
@@ -939,11 +1119,10 @@ Please regenerate the report incorporating these changes while maintaining all o
                 <div className="flex border-b border-white/10 flex-shrink-0">
                   <button
                     onClick={() => setActiveRightTab('console')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
-                      activeRightTab === 'console'
-                        ? 'bg-blue-500/20 text-blue-400 border-b-2 border-blue-500'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
+                    className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${activeRightTab === 'console'
+                      ? 'bg-blue-500/20 text-blue-400 border-b-2 border-blue-500'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
                   >
                     <div className="flex items-center justify-center gap-2">
                       <Code className="w-4 h-4" />
@@ -952,11 +1131,10 @@ Please regenerate the report incorporating these changes while maintaining all o
                   </button>
                   <button
                     onClick={() => setActiveRightTab('plan')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
-                      activeRightTab === 'plan'
-                        ? 'bg-purple-500/20 text-purple-400 border-b-2 border-purple-500'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
+                    className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${activeRightTab === 'plan'
+                      ? 'bg-purple-500/20 text-purple-400 border-b-2 border-purple-500'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
                   >
                     <div className="flex items-center justify-center gap-2">
                       <FileText className="w-4 h-4" />
@@ -965,11 +1143,10 @@ Please regenerate the report incorporating these changes while maintaining all o
                   </button>
                   <button
                     onClick={() => setActiveRightTab('results')}
-                    className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${
-                      activeRightTab === 'results'
-                        ? 'bg-green-500/20 text-green-400 border-b-2 border-green-500'
-                        : 'text-gray-400 hover:text-white hover:bg-white/5'
-                    }`}
+                    className={`flex-1 px-4 py-3 text-sm font-medium transition-all ${activeRightTab === 'results'
+                      ? 'bg-green-500/20 text-green-400 border-b-2 border-green-500'
+                      : 'text-gray-400 hover:text-white hover:bg-white/5'
+                      }`}
                   >
                     <div className="flex items-center justify-center gap-2">
                       <Sparkles className="w-4 h-4" />
@@ -990,20 +1167,19 @@ Please regenerate the report incorporating these changes while maintaining all o
                     <div className="h-full overflow-auto p-4">
                       <div className="space-y-4">
                         <h3 className="text-white font-semibold">Execution Plan</h3>
-                        {dagData?.nodes ? (
+                        {gatedDagData?.nodes ? (
                           <div className="space-y-2">
-                            {dagData.nodes.map((node: any, index: number) => (
+                            {gatedDagData.nodes.map((node: any, index: number) => (
                               <div
                                 key={node.id}
-                                className={`p-3 rounded-lg border ${
-                                  node.status === 'completed'
-                                    ? 'bg-green-500/10 border-green-500/30'
-                                    : node.status === 'executing'
+                                className={`p-3 rounded-lg border ${node.status === 'completed'
+                                  ? 'bg-green-500/10 border-green-500/30'
+                                  : node.status === 'executing'
                                     ? 'bg-blue-500/10 border-blue-500/30 animate-pulse'
                                     : node.status === 'failed'
-                                    ? 'bg-red-500/10 border-red-500/30'
-                                    : 'bg-white/5 border-white/10'
-                                }`}
+                                      ? 'bg-red-500/10 border-red-500/30'
+                                      : 'bg-white/5 border-white/10'
+                                  }`}
                               >
                                 <div className="flex items-center gap-2">
                                   <span className="text-gray-400 text-xs">Step {index + 1}</span>
@@ -1031,13 +1207,22 @@ Please regenerate the report incorporating these changes while maintaining all o
                         <div className="space-y-4">
                           <div className="flex items-center justify-between">
                             <h3 className="text-white font-semibold">Generated Report</h3>
-                            <button
-                              onClick={downloadReport}
-                              className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-xs transition-colors"
-                            >
-                              <Download className="w-3 h-3" />
-                              {result.fullReport ? 'Download' : 'View Location'}
-                            </button>
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={downloadReport}
+                                className="flex items-center gap-1 px-3 py-1 bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 rounded text-xs transition-colors"
+                              >
+                                <Download className="w-3 h-3" />
+                                Download MD
+                              </button>
+                              <button
+                                onClick={downloadReportAsPdf}
+                                className="flex items-center gap-1 px-3 py-1 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 rounded text-xs transition-colors"
+                              >
+                                <Download className="w-3 h-3" />
+                                Download PDF
+                              </button>
+                            </div>
                           </div>
 
                           {result.fullReport ? (

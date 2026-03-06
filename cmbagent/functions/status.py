@@ -383,6 +383,7 @@ def record_status_starter(context_variables: ContextVariables, cmbagent_instance
     }
 
     icon = status_icons.get(current_status, "")
+    context_variables["current_status"] = current_status
 
     context_variables["transfer_to_engineer"] = False
     context_variables["transfer_to_researcher"] = False

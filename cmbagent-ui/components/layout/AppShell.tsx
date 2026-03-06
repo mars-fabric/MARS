@@ -83,7 +83,7 @@ export default function AppShell({ children }: AppShellProps) {
         <main
           id="mars-main-content"
           role="main"
-          className="flex-1 min-h-0 overflow-hidden"
+          className="flex-1 min-h-0 overflow-auto"
           style={{ backgroundColor: 'var(--mars-color-bg)' }}
         >
           {children}

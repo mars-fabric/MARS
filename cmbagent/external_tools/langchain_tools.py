@@ -8,6 +8,7 @@ import logging
 import structlog
 from typing import List
 from .tool_adapter import AG2ToolAdapter, convert_langchain_tool_to_ag2
+from .ag2_free_tools import _build_safe_duckduckgo_tool
 
 logger = structlog.get_logger(__name__)
 
@@ -47,10 +48,7 @@ def get_langchain_free_tools() -> List[AG2ToolAdapter]:
 
     # DuckDuckGo Search tool (free)
     try:
-        from langchain_community.tools import DuckDuckGoSearchRun
-
-        ddg_search = DuckDuckGoSearchRun()
-        tools.append(convert_langchain_tool_to_ag2(ddg_search))
+        tools.append(_build_safe_duckduckgo_tool())
     except ImportError as e:
         logger.warning("tool_import_failed", tool="DuckDuckGo search", error=str(e))
 
@@ -149,7 +147,7 @@ def get_langchain_search_tools() -> List[AG2ToolAdapter]:
         tools.extend([
             convert_langchain_tool_to_ag2(WikipediaQueryRun(api_wrapper=WikipediaAPIWrapper())),
             convert_langchain_tool_to_ag2(ArxivQueryRun(api_wrapper=ArxivAPIWrapper())),
-            convert_langchain_tool_to_ag2(DuckDuckGoSearchRun()),
+            _build_safe_duckduckgo_tool(),
         ])
     except ImportError as e:
         logger.warning("tool_import_failed", tool="search tools", error=str(e))
