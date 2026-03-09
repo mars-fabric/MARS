@@ -981,14 +981,14 @@ class CMBAgent:
             if agent.info['name'] == name:
                 return agent
         self.logger.error("get_agent_object_from_name: agent %s not found", name)
-        sys.exit()
+        return None
 
     def get_agent_from_name(self,name):
         for agent in self.agents:
             if agent.info['name'] == name:
                 return agent.agent
         self.logger.error("get_agent_from_name: agent %s not found", name)
-        sys.exit()
+        return None
 
     def init_agents(self,agent_llm_configs=None, default_formatter_model=default_formatter_model_default):
 

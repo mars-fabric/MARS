@@ -76,12 +76,12 @@ def register_functions_to_agents(cmbagent_instance):
                 logger.info("ag2_free_tools_loaded", tool_count=len(combined_tools))
 
                 # List of agents that should have access to external tools
-                agents_for_tools = [
+                agents_for_tools = [a for a in [
                     planner, researcher, web_surfer, retrieve_assistant, engineer, executor, control, admin,
                     task_recorder, task_improver, plan_recorder, plan_reviewer,
                     review_recorder, installer, idea_maker, idea_saver,
                     camb_context, classy_context, plot_judge, plot_debugger,
-                ]
+                ] if a is not None]
 
                 # Add RAG agents if available
                 if not cmbagent_instance.skip_rag_agents:
@@ -141,12 +141,12 @@ def register_functions_to_agents(cmbagent_instance):
                     logger.debug("mcp_server_tools", server=server_name, tool_count=len(tool_names))
 
                 # List of agents that should have access to MCP tools
-                agents_for_mcp = [
+                agents_for_mcp = [a for a in [
                     planner, researcher, web_surfer, retrieve_assistant, engineer, executor, control, admin,
                     task_recorder, task_improver, plan_recorder, plan_reviewer,
                     review_recorder, installer, idea_maker, idea_saver,
                     camb_context, classy_context, plot_judge, plot_debugger,
-                ]
+                ] if a is not None]
 
                 # Add RAG agents if available
                 if not cmbagent_instance.skip_rag_agents:

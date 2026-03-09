@@ -235,7 +235,7 @@ class AgentManager:
             if agent.info['name'] == name:
                 return agent.agent
         logger.error("agent_not_found", method="get_agent_from_name", agent=name)
-        sys.exit()
+        return None
 
     def get_agent_object_from_name(self, name: str) -> Any:
         """
@@ -251,7 +251,7 @@ class AgentManager:
             if agent.info['name'] == name:
                 return agent
         logger.error("agent_not_found", method="get_agent_object_from_name", agent=name)
-        sys.exit()
+        return None
 
     def filter_and_combine_agent_names(self, input_list: List[str]) -> str:
         """

@@ -77,7 +77,30 @@ def record_plan_constraints(needed_agents: List[Literal["engineer", "researcher"
                             context_variables: ContextVariables, cmbagent_instance) -> ReplyResult:
     """Records the constraints on the plan."""
     planner = cmbagent_instance.get_agent_from_name('planner')
+
+    # Filter out any agents that are not loaded in this cmbagent instance
+    valid_agents = []
+    skipped_agents = []
+    for a in needed_agents:
+        if cmbagent_instance.get_agent_from_name(a) is not None:
+            valid_agents.append(a)
+        else:
+            skipped_agents.append(a)
+            logger.warning("record_plan_constraints_skipping_unloaded_agent", agent=a)
+
+    if skipped_agents:
+        logger.warning("record_plan_constraints_agents_not_loaded", skipped=skipped_agents)
+
+    needed_agents = valid_agents
     context_variables["needed_agents"] = needed_agents
+
+    if not needed_agents:
+        logger.error("record_plan_constraints_no_valid_agents", original_agents=skipped_agents)
+        return ReplyResult(
+            target=AgentTarget(planner),
+            message="No valid agents could be loaded for the plan. Proceeding with available agents only.",
+            context_variables=context_variables
+        )
 
     str_to_append = f"The plan must strictly involve only the following agents: {', '.join(needed_agents)}\n"
 

@@ -65,7 +65,6 @@ cmbdir_*
 cmbagent_*
 FIXES*
 INTEGRATION_TESTS*
-
 docs/_*
 output/cmb_tt_power_spectrum.png
 docs/notebooks/bbolliet_local
