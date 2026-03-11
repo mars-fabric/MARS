@@ -230,6 +230,8 @@ def extract_method_result(results: dict) -> str:
 
     Tries ``researcher_response_formatter`` first; falls back to
     ``researcher`` if the formatter returned empty content.
+    As a last resort, scans all messages for the longest non-empty
+    content from any agent.
     """
     chat_history = results["chat_history"]
 
@@ -243,9 +245,29 @@ def extract_method_result(results: dict) -> str:
         except ValueError:
             continue
 
+    # Broader fallback: scan ALL messages for longest non-empty content
     if not task_result:
+        logger.warning("Primary method extraction failed, scanning all messages")
+        best = ""
+        for msg in chat_history:
+            name = msg.get("name", "")
+            content = msg.get("content", "")
+            if name and content and content.strip():
+                if len(content) > len(best):
+                    best = content
+        if best:
+            task_result = best
+            logger.info("Recovered method result from broad scan, length=%d", len(best))
+
+    if not task_result:
+        agent_names = [msg.get("name", "<no name>") for msg in chat_history if msg.get("name")]
+        logger.error(
+            "Method extraction failed. Agents in chat_history: %s",
+            list(set(agent_names)),
+        )
         raise ValueError(
-            "Neither 'researcher_response_formatter' nor 'researcher' found with content in chat history"
+            "No agent found with content in chat history for methodology. "
+            f"Available agents: {list(set(agent_names))}"
         )
 
     return extract_clean_markdown(task_result)
@@ -347,7 +369,10 @@ def extract_experiment_result(results: dict) -> Tuple[str, List[str]]:
     """Extract experiment results text and plot paths.
 
     Tries ``researcher_response_formatter`` first; falls back to
-    ``researcher`` if the formatter returned empty content.
+    ``researcher``, then ``engineer_response_formatter``, then
+    ``engineer`` if earlier agents returned empty content.
+    As a last resort, scans all messages for the longest non-empty
+    content from any response-formatter or execution agent.
 
     Returns:
         (experiment_results_markdown, plot_paths_list)
@@ -356,7 +381,13 @@ def extract_experiment_result(results: dict) -> Tuple[str, List[str]]:
     final_context = results["final_context"]
 
     task_result = ""
-    for agent_name in ("researcher_response_formatter", "researcher"):
+    for agent_name in (
+        "researcher_response_formatter",
+        "researcher",
+        "engineer_response_formatter",
+        "engineer",
+        "executor_response_formatter",
+    ):
         try:
             candidate = get_task_result(chat_history, agent_name)
             if candidate and candidate.strip():
@@ -365,9 +396,29 @@ def extract_experiment_result(results: dict) -> Tuple[str, List[str]]:
         except ValueError:
             continue
 
+    # Broader fallback: scan ALL messages for the longest non-empty content
     if not task_result:
+        logger.warning("Primary experiment extraction failed, scanning all messages")
+        best = ""
+        for msg in chat_history:
+            name = msg.get("name", "")
+            content = msg.get("content", "")
+            if name and content and content.strip():
+                if len(content) > len(best):
+                    best = content
+        if best:
+            task_result = best
+            logger.info("Recovered experiment result from broad scan, length=%d", len(best))
+
+    if not task_result:
+        agent_names = [msg.get("name", "<no name>") for msg in chat_history if msg.get("name")]
+        logger.error(
+            "Experiment extraction failed. Agents in chat_history: %s",
+            list(set(agent_names)),
+        )
         raise ValueError(
-            "Neither 'researcher_response_formatter' nor 'researcher' found with content in chat history"
+            "No agent found with content in chat history for experiment results. "
+            f"Available agents: {list(set(agent_names))}"
         )
 
     experiment_results = extract_clean_markdown(task_result)
