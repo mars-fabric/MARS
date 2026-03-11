@@ -684,6 +684,12 @@ function IntakeStep({
   )
   const [loadingClient, setLoadingClient] = useState(false)
   const [suggestedFuncs, setSuggestedFuncs] = useState<string[]>([])
+  const [suggestedDiscoveryTypes, setSuggestedDiscoveryTypes] = useState<string[]>([])
+  const [autoFilled, setAutoFilled] = useState(false)
+  const [customBusinessFunc, setCustomBusinessFunc] = useState('')
+  const [showCustomFunc, setShowCustomFunc] = useState(false)
+  const [customDiscoveryType, setCustomDiscoveryType] = useState('')
+  const [showCustomDiscovery, setShowCustomDiscovery] = useState(false)
 
   const update = useCallback(
     (patch: Partial<IntakeFormData>) => {
@@ -696,7 +702,7 @@ function IntakeStep({
     [onUpdate],
   )
 
-  // auto-detect client details
+  // auto-detect ALL client details when client name is entered
   useEffect(() => {
     if (!form.clientName || form.clientName.length < 3) return
     const timeout = setTimeout(async () => {
@@ -704,15 +710,31 @@ function IntakeStep({
       try {
         const details = await getClientDetails(form.clientName)
         const patch: Partial<IntakeFormData> = {}
-        if (details.industry && !form.industry) patch.industry = details.industry
-        if (details.subIndustry && !form.subIndustry)
-          patch.subIndustry = details.subIndustry
+        // Auto-fill all fields — user can always edit
+        if (details.industry) patch.industry = details.industry
+        if (details.subIndustry) patch.subIndustry = details.subIndustry
+        if (details.clientContext) patch.clientContext = details.clientContext
+        if (details.problemKeywords) patch.problemKeywords = details.problemKeywords
+        // Set first suggested business function as default
+        if (details.businessFunctions.length > 0) {
+          patch.businessFunction = details.businessFunctions[0]
+        }
+        // Set first suggested discovery type as default
+        if (details.suggestedDiscoveryTypes?.length > 0) {
+          patch.discoveryType = details.suggestedDiscoveryTypes[0]
+        }
+
         if (Object.keys(patch).length) {
           update(patch)
-          notify('Auto-populated industry details')
+          setAutoFilled(true)
+          notify('All fields auto-populated from company data — review & edit as needed')
         }
         if (details.businessFunctions.length)
-          setSuggestedFuncs(details.businessFunctions)
+          setSuggestedFuncs(details.suggestedBusinessFunctions?.length 
+            ? Array.from(new Set([...details.businessFunctions, ...details.suggestedBusinessFunctions]))
+            : details.businessFunctions)
+        if (details.suggestedDiscoveryTypes?.length)
+          setSuggestedDiscoveryTypes(details.suggestedDiscoveryTypes)
       } catch {
         /* ignore */
       } finally {
@@ -733,6 +755,24 @@ function IntakeStep({
       } else {
         update({ expectedOutput: [...filtered, opt] })
       }
+    }
+  }
+
+  const addCustomFunction = () => {
+    if (customBusinessFunc.trim()) {
+      update({ businessFunction: customBusinessFunc.trim() })
+      setSuggestedFuncs(prev => Array.from(new Set([...prev, customBusinessFunc.trim()])))
+      setCustomBusinessFunc('')
+      setShowCustomFunc(false)
+    }
+  }
+
+  const addCustomDiscoveryType = () => {
+    if (customDiscoveryType.trim()) {
+      update({ discoveryType: customDiscoveryType.trim() })
+      setSuggestedDiscoveryTypes(prev => Array.from(new Set([...prev, customDiscoveryType.trim()])))
+      setCustomDiscoveryType('')
+      setShowCustomDiscovery(false)
     }
   }
 
@@ -776,6 +816,13 @@ function IntakeStep({
                 />
               )}
             </div>
+            {autoFilled && (
+              <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-md text-sm"
+                style={{ backgroundColor: 'var(--mars-color-primary-subtle)', color: 'var(--mars-color-primary-text)' }}>
+                <Sparkles className="w-4 h-4" />
+                <span>All fields auto-populated with real company data — review and edit as needed</span>
+              </div>
+            )}
           </Field>
 
           {/* Industry / Sub-Industry */}
@@ -820,49 +867,132 @@ function IntakeStep({
 
           {/* Business Function */}
           <Field label="Business Function *">
-            <select
-              className="w-full h-9 px-3 border rounded-md text-sm"
-              style={inputStyle}
-              value={form.businessFunction}
-              onChange={(e) => update({ businessFunction: e.target.value })}
-            >
-              <option value="">Select business function</option>
-              {suggestedFuncs.length > 0 && (
-                <optgroup label={`Suggested for ${form.clientName}`}>
-                  {suggestedFuncs.map((fn) => (
+            <div className="space-y-2">
+              <select
+                className="w-full h-9 px-3 border rounded-md text-sm"
+                style={inputStyle}
+                value={form.businessFunction}
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') {
+                    setShowCustomFunc(true)
+                  } else {
+                    update({ businessFunction: e.target.value })
+                  }
+                }}
+              >
+                <option value="">Select business function</option>
+                {suggestedFuncs.length > 0 && (
+                  <optgroup label={`Suggested for ${form.clientName}`}>
+                    {suggestedFuncs.map((fn) => (
+                      <option key={fn} value={fn}>
+                        ✨ {fn}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="All Functions">
+                  {BUSINESS_FUNCTIONS.filter(
+                    (fn) => !suggestedFuncs.includes(fn),
+                  ).map((fn) => (
                     <option key={fn} value={fn}>
-                      ✨ {fn}
+                      {fn}
                     </option>
                   ))}
                 </optgroup>
+                <option value="__custom__">+ Add Custom Function</option>
+              </select>
+              {showCustomFunc && (
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 h-9 px-3 border rounded-md text-sm"
+                    style={inputStyle}
+                    value={customBusinessFunc}
+                    onChange={(e) => setCustomBusinessFunc(e.target.value)}
+                    placeholder="Enter custom business function"
+                    onKeyDown={(e) => e.key === 'Enter' && addCustomFunction()}
+                  />
+                  <button
+                    className="px-3 h-9 text-sm font-medium rounded-md text-white"
+                    style={{ backgroundColor: 'var(--mars-color-primary)' }}
+                    onClick={addCustomFunction}
+                  >
+                    Add
+                  </button>
+                  <button
+                    className="px-3 h-9 text-sm rounded-md border"
+                    style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}
+                    onClick={() => setShowCustomFunc(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
               )}
-              <optgroup label="All Functions">
-                {BUSINESS_FUNCTIONS.filter(
-                  (fn) => !suggestedFuncs.includes(fn),
-                ).map((fn) => (
-                  <option key={fn} value={fn}>
-                    {fn}
-                  </option>
-                ))}
-              </optgroup>
-            </select>
+            </div>
           </Field>
 
           {/* Discovery Type */}
           <Field label="Type of Discovery *">
-            <select
-              className="w-full h-9 px-3 border rounded-md text-sm"
-              style={inputStyle}
-              value={form.discoveryType}
-              onChange={(e) => update({ discoveryType: e.target.value })}
-            >
-              <option value="">Select discovery type</option>
-              {DISCOVERY_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
+            <div className="space-y-2">
+              <select
+                className="w-full h-9 px-3 border rounded-md text-sm"
+                style={inputStyle}
+                value={form.discoveryType}
+                onChange={(e) => {
+                  if (e.target.value === '__custom__') {
+                    setShowCustomDiscovery(true)
+                  } else {
+                    update({ discoveryType: e.target.value })
+                  }
+                }}
+              >
+                <option value="">Select discovery type</option>
+                {suggestedDiscoveryTypes.length > 0 && (
+                  <optgroup label={`Suggested for ${form.clientName}`}>
+                    {suggestedDiscoveryTypes.map((t) => (
+                      <option key={t} value={t}>
+                        ✨ {t}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                <optgroup label="All Types">
+                  {DISCOVERY_TYPES.filter(
+                    (t) => !suggestedDiscoveryTypes.includes(t),
+                  ).map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </optgroup>
+                <option value="__custom__">+ Add Custom Type</option>
+              </select>
+              {showCustomDiscovery && (
+                <div className="flex gap-2">
+                  <input
+                    className="flex-1 h-9 px-3 border rounded-md text-sm"
+                    style={inputStyle}
+                    value={customDiscoveryType}
+                    onChange={(e) => setCustomDiscoveryType(e.target.value)}
+                    placeholder="Enter custom discovery type"
+                    onKeyDown={(e) => e.key === 'Enter' && addCustomDiscoveryType()}
+                  />
+                  <button
+                    className="px-3 h-9 text-sm font-medium rounded-md text-white"
+                    style={{ backgroundColor: 'var(--mars-color-primary)' }}
+                    onClick={addCustomDiscoveryType}
+                  >
+                    Add
+                  </button>
+                  <button
+                    className="px-3 h-9 text-sm rounded-md border"
+                    style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}
+                    onClick={() => setShowCustomDiscovery(false)}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
+            </div>
           </Field>
 
           {/* Process Type */}
@@ -2301,43 +2431,172 @@ function SummaryStep({
   )
   const selectedFeatures = state.features.filter((f) => f.selected)
 
-  const generateFullSummary = () => `# Product Discovery Summary
+  const generateFullSummary = () => {
+    const researchSection = state.researchSummary ? `
+## Research Summary
+
+### Market Trends
+${(state.researchSummary.marketTrends || []).map((t, i) => `${i + 1}. ${t}`).join('\n')}
+
+### Competitor Moves
+${(state.researchSummary.competitorMoves || []).map((c, i) => `${i + 1}. ${c}`).join('\n')}
+
+### Industry Pain Points
+${(state.researchSummary.industryPainPoints || []).map((p, i) => `${i + 1}. ${p}`).join('\n')}
+
+### Workshop Angles
+${(state.researchSummary.workshopAngles || []).map((a, i) => `${i + 1}. ${a}`).join('\n')}
+
+### References
+${(state.researchSummary.references || []).map((r) => `- ${r}`).join('\n')}
+` : ''
+
+    const problemSection = state.problemDefinition ? `
+## Problem Definition
+
+### Problem Statement
+${state.problemDefinition.problemStatement || ''}
+
+### Supporting Points
+${(Array.isArray(state.problemDefinition.supportingPoints) ? state.problemDefinition.supportingPoints : [state.problemDefinition.supportingPoints]).filter(Boolean).map((p, i) => `${i + 1}. ${p}`).join('\n')}
+
+### Personas Affected
+${(Array.isArray(state.problemDefinition.personasAffected) ? state.problemDefinition.personasAffected : [state.problemDefinition.personasAffected]).filter(Boolean).map((p, i) => `${i + 1}. ${p}`).join('\n')}
+
+### KPIs Impacted
+${(Array.isArray(state.problemDefinition.kpisImpacted) ? state.problemDefinition.kpisImpacted : [state.problemDefinition.kpisImpacted]).filter(Boolean).map((k, i) => `${i + 1}. ${k}`).join('\n')}
+
+### Root Cause Analysis
+${state.problemDefinition.rootCause || ''}
+
+### Reframing Examples
+${(Array.isArray(state.problemDefinition.reframingExamples) ? state.problemDefinition.reframingExamples : [state.problemDefinition.reframingExamples]).filter(Boolean).map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+### References
+${(state.problemDefinition.references || []).map((r) => `- ${r}`).join('\n')}
+` : ''
+
+    const allOpportunities = state.opportunities.length > 0 ? `
+## All Opportunity Areas Evaluated
+
+${state.opportunities.map((o, i) => `### ${i + 1}. ${o.title} ${o.id === state.selectedOpportunity ? '⭐ (SELECTED)' : ''}
+- **Value Category:** ${o.valueCategory}
+- **Explanation:** ${o.explanation}
+- **KPIs:** ${(o.kpis || []).join(', ')}
+- **Why Now:** ${o.whyNow}
+${o.references?.length ? `- **References:** ${o.references.join(', ')}` : ''}
+`).join('\n')}
+` : ''
+
+    const allArchetypes = state.solutionArchetypes.length > 0 ? `
+## Solution Archetypes Evaluated
+
+${state.solutionArchetypes.map((a, i) => `### ${i + 1}. ${a.title} ${a.id === state.selectedArchetype ? '⭐ (SELECTED)' : ''}
+- **Summary:** ${a.summary}
+- **Personas:** ${(a.personas || []).join(', ')}
+- **Benefits:** ${(a.benefits || []).join('; ')}
+${a.references?.length ? `- **References:** ${a.references.join(', ')}` : ''}
+`).join('\n')}
+` : ''
+
+    const allFeatures = state.features.length > 0 ? `
+## Complete Feature Set
+
+### Selected Features (${selectedFeatures.length})
+${selectedFeatures.map((f, i) => `#### ${i + 1}. ${f.name} (${f.priority})
+- **Description:** ${f.description}
+- **Strategic Goal:** ${f.strategicGoal}
+- **User Stories:**
+${(f.userStories || []).map(s => `  - ${s}`).join('\n')}
+- **Success Metrics:**
+${(f.successMetrics || []).map(m => `  - ${m}`).join('\n')}
+- **Bucket:** ${f.bucket}
+`).join('\n')}
+
+### Deferred Features
+${state.features.filter(f => !f.selected).map((f, i) => `${i + 1}. **${f.name}** (${f.priority}): ${f.description}`).join('\n')}
+` : ''
+
+    return `# Product Discovery Report — ${state.intakeData?.clientName}
+
+---
+**Date:** ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+**Prepared by:** Domain Consulting Group — Product Discovery Team
+**Engagement Type:** ${state.intakeData?.discoveryType} Discovery
+**Research Mode:** ${state.intakeData?.researchMode === 'planning_and_control' ? 'Deep Research (Planning & Control)' : 'One-Shot Research'}
+
+---
+
+## Executive Summary
+
+This report presents the findings of a comprehensive product discovery engagement conducted for **${state.intakeData?.clientName}** in the **${state.intakeData?.industry} — ${state.intakeData?.subIndustry}** space. The discovery focused on the **${state.intakeData?.businessFunction}** function, investigating challenges related to: *${state.intakeData?.problemKeywords}*.
+
+**Selected Opportunity:** ${selectedOpportunity?.title} (${selectedOpportunity?.valueCategory})
+**Proposed Solution:** ${selectedArchetype?.title}
+**Features Identified:** ${state.features.length} total, ${selectedFeatures.length} selected for implementation
+
+---
 
 ## Client Information
 - **Client:** ${state.intakeData?.clientName}
-- **Industry:** ${state.intakeData?.industry} - ${state.intakeData?.subIndustry}
+- **Industry:** ${state.intakeData?.industry} — ${state.intakeData?.subIndustry}
+- **Client Context:** ${state.intakeData?.clientContext}
 - **Business Function:** ${state.intakeData?.businessFunction}
 - **Discovery Type:** ${state.intakeData?.discoveryType}
+- **Process Type:** ${state.intakeData?.processType === 'existing' ? 'Existing Process — ' + (state.intakeData?.existingFunctionality || '') : 'New Process'}
+- **Problem Keywords:** ${state.intakeData?.problemKeywords}
 
-## Problem Statement
-${state.problemDefinition?.problemStatement || ''}
+---
+${researchSection}
+---
+${problemSection}
+---
+${allOpportunities}
+---
 
-## Selected Opportunity
+## Selected Opportunity — Deep Dive
 **${selectedOpportunity?.title}**
 ${selectedOpportunity?.explanation}
 - **Value Category:** ${selectedOpportunity?.valueCategory}
+- **KPIs:** ${(selectedOpportunity?.kpis || []).join(', ')}
 - **Why Now:** ${selectedOpportunity?.whyNow}
 
-## Solution Archetype
+---
+${allArchetypes}
+---
+
+## Selected Solution — Deep Dive
 **${selectedArchetype?.title}**
 ${selectedArchetype?.summary}
+- **Personas:** ${(selectedArchetype?.personas || []).join(', ')}
+- **Benefits:** ${(selectedArchetype?.benefits || []).map((b, i) => `\n  ${i + 1}. ${b}`).join('')}
 
-## Selected Features (${selectedFeatures.length})
-${selectedFeatures.map((f) => `- ${f.name} (${f.priority})`).join('\n')}
+---
+${allFeatures}
+---
 
 ## Prototype Prompts
-### Lovable
+
+### Lovable App Builder Prompt
 ${state.prompts?.lovable || ''}
 
-### Google AI Studio
+### Google AI Studio Prompt
 ${state.prompts?.googleAI || ''}
 
-### General LLM
+### General LLM Prompt
 ${state.prompts?.general || ''}
+
+---
 
 ## Presentation Slides
 ${state.slideContent || ''}
+
+---
+
+*Report generated by MARS Product Discovery Assistant (PDA)*
+*Domain Consulting Group © ${new Date().getFullYear()}*
 `
+  }
 
   const handleCopy = async (key: string, content: string) => {
     try {
@@ -2529,7 +2788,7 @@ ${state.slideContent || ''}
           />
           <CopyBtn
             id="full"
-            label="Copy Full Summary"
+            label="Copy Full Report"
             content={generateFullSummary()}
           />
           <button
@@ -2542,16 +2801,77 @@ ${state.slideContent || ''}
               const url = URL.createObjectURL(blob)
               const a = document.createElement('a')
               a.href = url
-              a.download = `discovery-${state.intakeData?.clientName?.replace(/\s+/g, '-').toLowerCase()}.md`
+              a.download = `discovery-report-${state.intakeData?.clientName?.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0,10)}.md`
               a.click()
-              notify('Downloaded summary')
+              notify('Downloaded full report')
             }}
           >
             <Download className="w-4 h-4" />
-            Download as Markdown
+            Download Full Report (.md)
           </button>
         </Card>
       </div>
+
+      {/* Problem & Research Highlights */}
+      {state.problemDefinition && (
+        <Card className="p-5 space-y-3">
+          <h3 className="font-semibold" style={{ color: 'var(--mars-color-text)' }}>
+            Problem Statement
+          </h3>
+          <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+            {state.problemDefinition.problemStatement}
+          </p>
+          {state.problemDefinition.rootCause && (
+            <>
+              <h4 className="text-sm font-semibold mt-2" style={{ color: 'var(--mars-color-text)' }}>
+                Root Cause Analysis
+              </h4>
+              <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                {state.problemDefinition.rootCause}
+              </p>
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* Selected Features Summary */}
+      {selectedFeatures.length > 0 && (
+        <Card className="p-5 space-y-3">
+          <h3 className="font-semibold" style={{ color: 'var(--mars-color-text)' }}>
+            Selected Features ({selectedFeatures.length})
+          </h3>
+          <div className="space-y-2">
+            {selectedFeatures.map((f) => (
+              <div key={f.id} className="flex items-start gap-2 text-sm">
+                <span className="text-xs px-2 py-0.5 rounded-full font-medium mt-0.5"
+                  style={{
+                    backgroundColor: f.priority === 'Must' ? '#fee2e2' : f.priority === 'Should' ? '#fef3c7' : '#dbeafe',
+                    color: f.priority === 'Must' ? '#991b1b' : f.priority === 'Should' ? '#92400e' : '#1e40af',
+                  }}>
+                  {f.priority}
+                </span>
+                <div>
+                  <span className="font-medium" style={{ color: 'var(--mars-color-text)' }}>{f.name}</span>
+                  <span style={{ color: 'var(--mars-color-text-secondary)' }}> — {f.description}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
+      {/* Slide Content Preview */}
+      {state.slideContent && (
+        <Card className="p-5 space-y-3">
+          <h3 className="font-semibold" style={{ color: 'var(--mars-color-text)' }}>
+            Report / Slide Content Preview
+          </h3>
+          <div className="max-h-96 overflow-y-auto border rounded-md p-4"
+            style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
+            <Md content={state.slideContent} />
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

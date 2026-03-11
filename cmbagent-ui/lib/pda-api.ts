@@ -38,27 +38,51 @@ async function callPDA<T = any>(
 }
 
 // ---------------------------------------------------------------------------
-// Step 0 — Client Details (auto-detect)
+// Step 0 — Client Details (auto-detect ALL fields)
 // ---------------------------------------------------------------------------
 export async function getClientDetails(
   clientName: string,
-): Promise<{ industry: string; subIndustry: string; businessFunctions: string[] }> {
+): Promise<{
+  industry: string
+  subIndustry: string
+  clientContext: string
+  businessFunctions: string[]
+  suggestedDiscoveryTypes: string[]
+  problemKeywords: string
+  suggestedBusinessFunctions: string[]
+}> {
   try {
     const result = await callPDA<{
       industry: string
       subIndustry: string
+      clientContext: string
       businessFunctions: string[]
+      suggestedDiscoveryTypes: string[]
+      problemKeywords: string
+      suggestedBusinessFunctions: string[]
     }>('/client-details', { clientName })
     return {
       industry: result.industry || '',
       subIndustry: result.subIndustry || '',
+      clientContext: result.clientContext || '',
       businessFunctions: Array.isArray(result.businessFunctions)
         ? result.businessFunctions
+        : [],
+      suggestedDiscoveryTypes: Array.isArray(result.suggestedDiscoveryTypes)
+        ? result.suggestedDiscoveryTypes
+        : [],
+      problemKeywords: result.problemKeywords || '',
+      suggestedBusinessFunctions: Array.isArray(result.suggestedBusinessFunctions)
+        ? result.suggestedBusinessFunctions
         : [],
     }
   } catch (error) {
     console.error('Failed to get client details:', error)
-    return { industry: '', subIndustry: '', businessFunctions: [] }
+    return {
+      industry: '', subIndustry: '', clientContext: '',
+      businessFunctions: [], suggestedDiscoveryTypes: [],
+      problemKeywords: '', suggestedBusinessFunctions: [],
+    }
   }
 }
 

@@ -430,41 +430,63 @@ async def _async_planning_control(task: str) -> Dict[str, Any]:
 _SYSTEM_STRATEGIST = (
     "You are a senior Product Discovery strategist at Domain Consulting Group. "
     "You specialize in turning fuzzy business problems into clear, evidence-backed "
-    "opportunity spaces.  Always return ONLY valid JSON — no markdown, no prose."
+    "opportunity spaces. CRITICAL RULE: You MUST use ONLY real, verifiable, factual data. "
+    "Every statistic, percentage, market size, growth rate, competitor move, and trend you cite "
+    "MUST be grounded in real-world sources — publicly available reports (Gartner, McKinsey, "
+    "Forrester, Statista, company earnings, SEC filings, industry publications). "
+    "NEVER fabricate numbers. If you cite '50% improvement' it must be a real documented case. "
+    "If unsure, say 'estimated' or 'industry benchmarks suggest'. Include source references. "
+    "Always return ONLY valid JSON — no markdown, no prose."
 )
 
 
 async def get_client_details(client_name: str) -> Dict[str, Any]:
     """
-    Step 0 helper: Auto-detect client industry/sub-industry/functions.
+    Step 0 helper: Auto-detect ALL intake fields from company name.
     Uses direct LLM via cmbagent provider.
+    Returns industry, sub-industry, client context, business functions,
+    suggested discovery types, and problem keywords — all editable by user.
     """
-    prompt = f"""You are a business intelligence assistant. Based on the client/company name provided, identify their industry, sub-industry, and relevant business functions.
+    prompt = f"""You are a business intelligence assistant with deep knowledge of global companies. Based on the client/company name provided, generate a COMPREHENSIVE profile with REAL, FACTUAL information.
 
 Client/Company Name: {client_name}
 
-Provide accurate, research-backed information about this organization. If the company is well-known, use your knowledge. If uncertain, make reasonable inferences based on the company name.
+IMPORTANT: Use ONLY real, verifiable facts about this company. Include actual revenue figures, employee counts, market positions, real product names, real strategic initiatives, and real technology stacks. If the company is well-known, use your factual knowledge. Do NOT make up statistics or initiatives. If uncertain about specific numbers, say "estimated" but stay grounded in reality.
 
 Return ONLY valid JSON with no markdown formatting, using this exact structure:
 {{
   "industry": "Primary industry (e.g., Retail, Healthcare, Financial Services, Technology, Manufacturing)",
   "subIndustry": "More specific sub-industry (e.g., Fashion Retail, Investment Banking, Cloud Services)",
-  "businessFunctions": ["Function 1", "Function 2", "Function 3"]
-}}
+  "clientContext": "A detailed 4-6 sentence paragraph about the company using REAL facts: actual revenue/market cap, employee count, market position, key products/services, recent strategic initiatives (with real names), digital maturity level, technology stack they are known to use, and competitive landscape. Use real numbers and real initiative names.",
+  "businessFunctions": ["Top 3-5 most relevant business functions from: Store Ops, Supply Chain, Merchandising, E-commerce, HR, Finance, Manufacturing, Marketing, Customer Service, R&D, Data Analytics, IT Operations, Logistics, Sales, Product Management"],
+  "suggestedDiscoveryTypes": ["2-3 most relevant discovery types from: Problem, Opportunity, Pain Point, Capability, Open Discovery, Process Optimization, Digital Transformation, Customer Experience, Automation, Innovation"],
+  "problemKeywords": "3-5 real, current challenges or opportunities this company is known to face based on recent news, earnings calls, or industry analysis. Be specific and factual.",
+  "suggestedBusinessFunctions": ["All applicable business functions for this company type"]
+}}"""
 
-Business functions should be selected from: Store Ops, Supply Chain, Merchandising, E-commerce, HR, Finance, Manufacturing, Marketing. Include 2-4 most relevant functions for this client."""
-
-    content = await _async_llm_direct(prompt, "You are a business intelligence assistant specializing in company analysis.")
+    content = await _async_llm_direct(
+        prompt,
+        "You are a business intelligence assistant specializing in company analysis. "
+        "You MUST use real, factual, verifiable information. Never fabricate statistics or initiatives.",
+    )
 
     parsed = _extract_json_object(content)
     if parsed:
         return {
             "industry": parsed.get("industry", ""),
             "subIndustry": parsed.get("subIndustry", ""),
+            "clientContext": parsed.get("clientContext", ""),
             "businessFunctions": parsed.get("businessFunctions", []),
+            "suggestedDiscoveryTypes": parsed.get("suggestedDiscoveryTypes", []),
+            "problemKeywords": parsed.get("problemKeywords", ""),
+            "suggestedBusinessFunctions": parsed.get("suggestedBusinessFunctions", []),
         }
 
-    return {"industry": "", "subIndustry": "", "businessFunctions": []}
+    return {
+        "industry": "", "subIndustry": "", "clientContext": "",
+        "businessFunctions": [], "suggestedDiscoveryTypes": [],
+        "problemKeywords": "", "suggestedBusinessFunctions": [],
+    }
 
 
 async def generate_research_summary(intake_data: Dict[str, Any], research_mode: str = "one_shot") -> Dict[str, Any]:
@@ -561,6 +583,8 @@ def _build_research_prompt(intake_data: Dict[str, Any]) -> str:
     )
     return f"""You are a senior Product Discovery strategist at Domain Consulting Group, specializing in turning fuzzy business problems into clear, evidence-backed opportunity spaces.
 
+CRITICAL: ALL data, statistics, percentages, market sizes, growth rates, and competitor moves you mention MUST be REAL and VERIFIABLE. Cite real reports (Gartner, McKinsey, Forrester, Statista, IDC, company earnings calls, SEC filings, industry publications). If you say "40% of retailers" or "$4.4 trillion market" — it must be a real documented figure. NEVER fabricate statistics. When uncertain, use "industry estimates suggest" or "analysts project approximately" and cite the source.
+
 Using the inputs below, generate a concise but comprehensive research summary that is tightly focused on the specific Problem/Keywords (do not default to generic industry overviews):
 
 * Client: {intake_data.get('clientName', '')}
@@ -584,11 +608,11 @@ Using the inputs below, generate a concise but comprehensive research summary th
 ### Output Format (JSON only)
 Return ONLY valid JSON, no markdown, no explanations:
 {{
-  "marketTrends": ["Each item: a concrete, data-backed trend related to the Problem/Keywords. 2-4 sentences per item with specific numbers, percentages, or real examples. 10-15 items REQUIRED."],
-  "competitorMoves": ["Each item: a specific competitor move or strategic initiative relevant to the Problem/Keywords. Name real companies and their actions where possible. 2-4 sentences. 10-15 items REQUIRED."],
-  "industryPainPoints": ["Each item: a concrete pain point tied to the Problem/Keywords. Include measurable impact (cost, time, revenue, satisfaction). 2-4 sentences. 10-15 items REQUIRED."],
-  "workshopAngles": ["Each item: a sharp, provocative angle for a product discovery workshop. Include the 'so what' — why this angle matters and what it unlocks. 2-4 sentences. 10-15 items REQUIRED."],
-  "references": ["Each item: a specific, authoritative reference (reports, analyst publications, industry studies). 8-12 items."]
+  "marketTrends": ["Each item: a concrete, REAL, data-backed trend related to the Problem/Keywords. Cite specific reports, studies, or publications. Include real numbers (market sizes, growth rates, adoption percentages) from verifiable sources like Gartner, McKinsey, Forrester, Statista, IDC, or company earnings. 2-4 sentences per item. 10-15 items REQUIRED."],
+  "competitorMoves": ["Each item: a REAL, documented competitor move or strategic initiative relevant to the Problem/Keywords. Name REAL companies and their ACTUAL announced or reported actions (product launches, acquisitions, partnerships, strategy shifts). Include dates where possible. 2-4 sentences. 10-15 items REQUIRED."],
+  "industryPainPoints": ["Each item: a concrete pain point tied to the Problem/Keywords, backed by REAL survey data, research findings, or documented case studies. Include measurable impact with REAL figures (cost, time, revenue, satisfaction scores from actual studies). 2-4 sentences. 10-15 items REQUIRED."],
+  "workshopAngles": ["Each item: a sharp, provocative angle for a product discovery workshop grounded in REAL industry evidence. Reference actual case studies, implementations, or research findings. Include the 'so what' — why this angle matters and what it unlocks. 2-4 sentences. 10-15 items REQUIRED."],
+  "references": ["Each item: a REAL, specific, authoritative reference (actual report titles with publication years, e.g., 'Gartner Magic Quadrant for Supply Chain Planning Solutions 2024', 'McKinsey Global Institute: The Future of Work 2023'). 8-12 items. ONLY cite references that actually exist."]
 }}"""
 
 
@@ -637,6 +661,8 @@ async def generate_problem_definition(
     )
 
     prompt = f"""You are a senior Product Discovery strategist at Domain Consulting Group. Based on the following research and inputs, generate a thorough, evidence-backed problem definition that will anchor the entire product discovery engagement.
+
+CRITICAL: ALL statistics, percentages, cost figures, improvement metrics, and impact assessments MUST be REAL and VERIFIABLE. Reference actual studies, surveys, reports, and documented case studies. When you say a KPI can improve by X%, cite a real benchmark or case study. Never fabricate numbers.
 
 Research Summary:
 Market Trends: {market}
@@ -715,6 +741,8 @@ async def generate_opportunities(
     )
 
     prompt = f"""You are a senior Product Discovery strategist at Domain Consulting Group. Based on the problem definition below, generate 6-10 specific, high-value opportunity areas that are tightly connected to the client's problem space.
+
+CRITICAL: ALL data points, improvement percentages, market sizes, ROI figures, and benchmarks MUST be REAL, VERIFIABLE numbers from actual industry reports, case studies, or documented implementations. Cite sources. NEVER fabricate statistics.
 
 Problem Definition:
 {problem_definition}
@@ -810,6 +838,8 @@ async def generate_solution_archetypes(
     )
 
     prompt = f"""You are a senior Product Discovery strategist and solution architect at Domain Consulting Group. Based on this opportunity, generate 3-5 distinct solution archetypes that address it from different strategic angles.
+
+CRITICAL: ALL benefits, improvement metrics, cost savings, and performance claims MUST be grounded in REAL industry benchmarks, documented case studies, or verifiable data. When you say "Reduce decision-making time by 60%" — cite a real implementation or benchmark. NEVER fabricate numbers.
 
 Opportunity: {selected_opportunity.get('title', '')}
 {selected_opportunity.get('explanation', '')}
@@ -910,7 +940,7 @@ async def generate_features(
 
     prompt = f"""You are a senior Product Manager and Feature Architect at Domain Consulting Group. Generate a comprehensive, production-grade feature set for this solution.
 
-Solution Archetype: {selected_archetype.get('title', '')}
+CRITICAL: ALL success metrics, performance targets, and benchmark figures MUST be grounded in REAL industry standards and documented case studies. Use verifiable benchmarks from real implementations. Never fabricate performance numbers.Solution Archetype: {selected_archetype.get('title', '')}
 {selected_archetype.get('summary', '')}
 Core Approach: {selected_archetype.get('coreApproach', '')}
 
@@ -1019,6 +1049,8 @@ async def generate_prompts(
 
     prompt = f"""You are an expert prompt engineer and product strategist at Domain Consulting Group. Generate three comprehensive, production-ready builder prompts for this solution.
 
+CRITICAL: All data, statistics, metrics, and benchmarks embedded in the prompts MUST be REAL and VERIFIABLE. The generated applications should use and display factual information from real sources.
+
 Client Context:
 - Client: {intake_data.get('clientName', '')}
 - Industry: {intake_data.get('industry', '')} - {intake_data.get('subIndustry', '')}
@@ -1083,15 +1115,32 @@ async def generate_slide_content(
     features: List[Dict[str, Any]],
 ) -> str:
     """
-    Step 7: Generate presentation slide content.
+    Step 7: Generate COMPREHENSIVE presentation slide content.
     Uses direct LLM for structured Markdown generation.
+    Generates a very long, detailed report (30+ slides, 5000+ words).
     """
     feature_list = "\n".join(
-        f"- {f.get('name', '')} ({f.get('priority', '')})"
+        f"- **{f.get('name', '')}** ({f.get('priority', '')}): {f.get('description', '')}"
+        for f in features if f.get("selected", False)
+    )
+    feature_stories = "\n".join(
+        f"  - {f.get('name', '')}: {'; '.join(f.get('userStories', []))}"
+        for f in features if f.get("selected", False)
+    )
+    feature_metrics = "\n".join(
+        f"  - {f.get('name', '')}: {'; '.join(f.get('successMetrics', []))}"
         for f in features if f.get("selected", False)
     )
 
-    prompt = f"""You are a senior presentation expert and product strategist at Domain Consulting Group. Generate comprehensive, executive-ready presentation slide content for this product discovery engagement. This is the FINAL deliverable — include MAXIMUM context and detail.
+    prompt = f"""You are a senior presentation expert, management consultant, and product strategist at Domain Consulting Group. Generate an EXTREMELY COMPREHENSIVE, executive-ready presentation report for this product discovery engagement. This is the FINAL deliverable that goes to the C-suite — it must be thorough, data-rich, and professional.
+
+CRITICAL REQUIREMENTS:
+1. This report MUST be 5,000-8,000 words minimum. Do NOT be brief. Every section needs DEEP detail.
+2. ALL statistics, market sizes, growth rates, ROI figures, improvement percentages, and benchmark data MUST be REAL and VERIFIABLE from actual industry sources (Gartner, McKinsey, Forrester, Statista, IDC, Deloitte, BCG, company earnings, SEC filings).
+3. NEVER fabricate numbers. If you say "40% improvement" or "$4B market", it MUST be a real documented figure.
+4. Include source citations in parentheses after data points, e.g., "(Source: Gartner 2024)" or "(McKinsey Global Survey, 2023)".
+5. Each slide section should have 8-15 detailed bullet points with substantive content.
+6. Include detailed speaker notes for EVERY slide marked with [SPEAKER NOTES: ...]
 
 Client Information:
 - Client: {intake_data.get('clientName', '')}
@@ -1112,46 +1161,217 @@ Opportunity: {opportunity.get('title', '')}
 Value Category: {opportunity.get('valueCategory', '')}
 KPIs: {', '.join(opportunity.get('kpis', []))}
 Why Now: {opportunity.get('whyNow', '')}
+Implementation Notes: {opportunity.get('implementationNotes', '')}
 
 Solution: {archetype.get('title', '')}
 {archetype.get('summary', '')}
 Core Approach: {archetype.get('coreApproach', '')}
 Technology Enablers: {', '.join(archetype.get('technologyEnablers', []))}
+Implementation Complexity: {archetype.get('implementationComplexity', '')}
 
-Features:
+Features (with descriptions):
 {feature_list}
 
-### Requirements
-- This is the FINAL report — include ALL research findings, analysis, and recommendations.
-- Each slide should have 5-8 detailed bullet points (not generic filler).
-- Use specific data, metrics, and evidence from the research.
-- Include speaker notes / talking points for key slides.
-- Incorporate client-specific context throughout. Tailor recommendations based on organizational maturity.
-- The document should be 1500-2500 words total — comprehensive enough to stand alone as a deliverable.
+Feature User Stories:
+{feature_stories}
 
-Generate slide-ready content for:
-1. **Title Slide** — Engagement title, client name, date, DCG branding
-2. **Executive Summary** — 4-6 bullets summarizing the entire discovery (problem, opportunity, solution, expected impact)
-3. **Problem Statement** — The core problem, evidence, and urgency (5-8 bullets)
-4. **Research Insights: Market Trends** — Key market trends with data (5-8 bullets)
-5. **Research Insights: Competitive Landscape** — What competitors are doing (5-8 bullets)
-6. **Research Insights: Industry Pain Points** — Critical pain points with impact (5-8 bullets)
-7. **Opportunity Analysis** — The selected opportunity, value drivers, and KPIs (5-8 bullets)
-8. **Solution Overview** — The archetype, core approach, and differentiators (5-8 bullets)
-9. **Features & Capabilities** — Key features organized by priority (8-12 bullets)
-10. **User Personas & Journeys** — Who benefits and how (5-8 bullets)
-11. **Value Drivers & ROI** — Expected business impact with metrics (5-8 bullets)
-12. **Architecture Snapshot** — High-level technical components and integration points (5-8 bullets)
-13. **Implementation Roadmap** — Phased approach: Quick Wins (0-3mo), Foundation (3-6mo), Scale (6-12mo) (6-10 bullets)
-14. **Risk & Mitigation** — Key risks and mitigation strategies (4-6 bullets)
-15. **Prototype Prompt** — How to build a working prototype (4-6 bullets)
-16. **Next Steps & Call to Action** — Concrete next steps with owners and timelines (5-8 bullets)
-17. **Appendix: References** — All sources and references
+Feature Success Metrics:
+{feature_metrics}
+
+### REQUIRED SLIDE STRUCTURE — Generate ALL of these sections with MAXIMUM detail:
+
+## Slide 1: Title Slide
+- Engagement title, client name, date, DCG branding, engagement team
+
+## Slide 2: Table of Contents
+- Numbered list of all sections
+
+## Slide 3: Executive Summary
+- 8-10 bullets covering: the problem, market context, selected opportunity, proposed solution, expected impact, timeline, investment range, and strategic alignment
+- [SPEAKER NOTES: 3-4 sentences framing the narrative]
+
+## Slide 4: Engagement Overview & Methodology
+- Discovery methodology used, stakeholders involved, research approach, data sources consulted
+- 6-8 bullets detailing the rigorous approach
+
+## Slide 5: Client Landscape & Current State
+- Detailed analysis of the client's current position: market share, digital maturity, organizational structure, tech stack, recent initiatives
+- 8-10 bullets with real data about the client
+
+## Slide 6: Problem Statement Deep Dive
+- The core problem with evidence and urgency
+- Root cause analysis (3 levels deep)
+- Impact quantification with real metrics
+- 10-12 bullets with specific data
+
+## Slide 7: Market Context & Industry Trends
+- 8-12 key market trends with REAL data points and sources
+- Market size, growth rates, adoption curves — all verifiable
+
+## Slide 8: Competitive Landscape Analysis
+- 8-10 real competitor moves with company names, dates, and specifics
+- Market positioning map description
+- Competitive threats and differentiation opportunities
+
+## Slide 9: Industry Pain Points & Market Gaps
+- 8-10 documented pain points with real impact data
+- Gap analysis showing unmet needs
+- Cross-reference with client-specific challenges
+
+## Slide 10: Stakeholder Impact Analysis
+- Personas affected with detailed pain descriptions
+- Frequency and severity assessment
+- Current workaround costs (quantified with real benchmarks)
+- 8-10 persona-impact bullets
+
+## Slide 11: Opportunity Analysis — Selected Opportunity
+- Deep dive into the selected opportunity
+- Value drivers and business case
+- KPIs with current baselines and target improvements (real benchmarks)
+- Why-now justification with market timing evidence
+- 10-12 detailed bullets
+
+## Slide 12: Alternative Opportunities Considered
+- Brief overview of other opportunity areas evaluated
+- Why the selected opportunity was chosen
+- 6-8 bullets
+
+## Slide 13: Solution Architecture Overview
+- The selected solution archetype: what it is, how it works
+- Core approach and differentiation
+- Technology stack and integration points
+- 10-12 bullets
+
+## Slide 14: Solution — User Experience & Workflows
+- Key user journeys and interaction patterns
+- Screen/module descriptions
+- Persona-specific workflows
+- 8-10 bullets
+
+## Slide 15: Solution — Technical Architecture
+- System architecture components
+- Data flow and integration patterns
+- API strategy and third-party integrations
+- Security and compliance considerations
+- 8-10 bullets
+
+## Slide 16: Feature Set — Must Have (Priority 1)
+- All Must-priority features with full descriptions
+- User stories and acceptance criteria for each
+- Success metrics for each feature
+- 8-12 bullets
+
+## Slide 17: Feature Set — Should Have & Could Have
+- Should/Could-priority features with descriptions
+- Strategic value of each
+- 6-10 bullets
+
+## Slide 18: Feature Dependency & Integration Map
+- How features relate to each other
+- Integration points and data dependencies
+- Build sequence rationale
+- 6-8 bullets
+
+## Slide 19: Value Drivers & ROI Analysis
+- Detailed ROI calculation framework
+- Expected business impact with REAL industry benchmarks
+- Revenue impact, cost savings, efficiency gains — all with verifiable numbers
+- Payback period estimates based on real case studies
+- 10-12 bullets
+
+## Slide 20: Success Metrics & KPI Dashboard
+- Complete KPI framework with baselines and targets
+- Measurement methodology
+- Reporting cadence and governance
+- 8-10 bullets
+
+## Slide 21: User Personas & Journey Maps
+- Detailed persona profiles (3-5 personas)
+- Current vs. future state journey for each
+- Pain points resolved and value delivered
+- 10-12 bullets
+
+## Slide 22: Data Strategy & Analytics
+- Data sources required
+- Analytics capabilities and insights
+- ML/AI models and their business value
+- Data governance considerations
+- 8-10 bullets
+
+## Slide 23: Implementation Roadmap — Phase 1: Quick Wins (0-3 months)
+- Specific deliverables and milestones
+- Team composition and effort estimates
+- Expected outcomes with metrics
+- 8-10 bullets
+
+## Slide 24: Implementation Roadmap — Phase 2: Foundation (3-6 months)
+- Core platform buildout details
+- Integration milestones
+- Training and change management
+- 8-10 bullets
+
+## Slide 25: Implementation Roadmap — Phase 3: Scale & Optimize (6-12 months)
+- Advanced features and optimizations
+- Scale-out plan
+- Continuous improvement framework
+- 8-10 bullets
+
+## Slide 26: Resource Requirements & Team Structure
+- Team composition (roles, FTE estimates)
+- Skill requirements
+- Training and onboarding plan
+- 6-8 bullets
+
+## Slide 27: Investment & Budget Guidance
+- High-level cost ranges for each phase (use real industry benchmarks for similar implementations)
+- Infrastructure costs, licensing, and operational expenses
+- Total cost of ownership (TCO) framework
+- 6-8 bullets
+
+## Slide 28: Risk Assessment & Mitigation
+- 8-10 identified risks with probability and impact
+- Mitigation strategies for each
+- Contingency plans
+
+## Slide 29: Change Management & Adoption Strategy
+- Stakeholder communication plan
+- Training approach
+- Adoption metrics and targets
+- 6-8 bullets
+
+## Slide 30: Prototype & POC Recommendations
+- What to build first as proof of concept
+- POC success criteria
+- Timeline and resources needed
+- How to use the generated builder prompts
+- 6-8 bullets
+
+## Slide 31: Next Steps & Call to Action
+- 8-10 concrete next steps with owners, timelines, and dependencies
+- Decision points and governance structure
+- Immediate actions (next 2 weeks)
+
+## Slide 32: Appendix A — Research References
+- Complete list of ALL sources cited throughout the report
+- Organized by category (market reports, case studies, analyst publications)
+
+## Slide 33: Appendix B — Detailed Feature Specifications
+- Full feature list with all user stories and success metrics
+
+## Slide 34: Appendix C — Glossary & Definitions
+- Key terms and definitions used in the report
 
 Format as markdown with ## for slide titles, ### for sub-sections, and - for bullets.
-Include references and data citations where applicable."""
+REMINDER: 5,000-8,000 words minimum. Be EXHAUSTIVE. Include [SPEAKER NOTES: ...] for every content slide."""
 
-    content = await _async_llm_direct(prompt, "You are a presentation expert and product strategist.")
+    content = await _async_llm_direct(
+        prompt,
+        "You are a management consultant and presentation expert. "
+        "You MUST use ONLY real, verifiable data and statistics from actual sources. "
+        "This is a COMPREHENSIVE final report — be extremely thorough. "
+        "Target 5,000-8,000 words minimum.",
+        max_tokens=16000,
+    )
     return content
 
 

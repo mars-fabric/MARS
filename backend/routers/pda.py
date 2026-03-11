@@ -55,7 +55,11 @@ class ClientDetailsRequest(BaseModel):
 class ClientDetailsResponse(BaseModel):
     industry: str
     subIndustry: str
-    businessFunctions: List[str]
+    clientContext: str = ""
+    businessFunctions: List[str] = Field(default_factory=list)
+    suggestedDiscoveryTypes: List[str] = Field(default_factory=list)
+    problemKeywords: str = ""
+    suggestedBusinessFunctions: List[str] = Field(default_factory=list)
 
 
 class ResearchSummaryRequest(BaseModel):
@@ -183,7 +187,7 @@ async def pda_health():
 
 @router.post("/client-details", response_model=ClientDetailsResponse)
 async def api_client_details(request: ClientDetailsRequest):
-    """Step 0: Auto-detect client industry and business functions."""
+    """Step 0: Auto-detect client info — fills ALL intake fields dynamically."""
     try:
         from services.pda_service import get_client_details
         result = await get_client_details(request.clientName)
