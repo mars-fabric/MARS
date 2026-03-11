@@ -29,7 +29,7 @@ dependencies = [
     "jsonref==1.1.0",
     "cobaya",                   # to use yaml_load_file function    # TODO: maybe replace if only yaml_load_file is needed
     "pandas >=2.2",
-
+    "ddgs",                     # for DuckDuckGo search tool in AG2 External Tools
     "streamlit",
     "ipython",                  # needed for streamlit
 
