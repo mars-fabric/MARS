@@ -1,0 +1,778 @@
+/* ==========================================================================
+   MARS Design System - Global Tokens & Utilities
+   Single source of truth for all visual properties.
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. CSS Reset (Modern)
+   -------------------------------------------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -moz-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+body {
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+img, picture, video, canvas, svg {
+  display: block;
+  max-width: 100%;
+}
+
+input, button, textarea, select {
+  font: inherit;
+}
+
+p, h1, h2, h3, h4, h5, h6 {
+  overflow-wrap: break-word;
+}
+
+/* --------------------------------------------------------------------------
+   2. Design Tokens (Dark Theme - Default)
+   -------------------------------------------------------------------------- */
+:root,
+[data-theme="dark"] {
+  /* --- Colors --- */
+  --mars-color-primary: #3B82F6;
+  --mars-color-primary-hover: #2563EB;
+  --mars-color-primary-active: #1D4ED8;
+  --mars-color-primary-subtle: rgba(59, 130, 246, 0.15);
+  --mars-color-primary-text: #93C5FD;
+
+  --mars-color-accent: #22C55E;
+  --mars-color-accent-hover: #16A34A;
+  --mars-color-accent-subtle: rgba(34, 197, 94, 0.15);
+
+  --mars-color-surface: #0B1220;
+  --mars-color-surface-raised: #111827;
+  --mars-color-surface-overlay: #1F2937;
+  --mars-color-surface-sunken: #060A12;
+
+  --mars-color-bg: #0B1220;
+  --mars-color-bg-secondary: #111827;
+  --mars-color-bg-tertiary: #1F2937;
+  --mars-color-bg-hover: rgba(255, 255, 255, 0.05);
+  --mars-color-bg-active: rgba(255, 255, 255, 0.08);
+
+  --mars-color-text: #F9FAFB;
+  --mars-color-text-secondary: #9CA3AF;
+  --mars-color-text-tertiary: #6B7280;
+  --mars-color-text-disabled: #4B5563;
+  --mars-color-text-inverse: #111827;
+
+  --mars-color-border: rgba(255, 255, 255, 0.1);
+  --mars-color-border-strong: rgba(255, 255, 255, 0.2);
+  --mars-color-border-subtle: rgba(255, 255, 255, 0.05);
+
+  --mars-color-success: #22C55E;
+  --mars-color-success-subtle: rgba(34, 197, 94, 0.15);
+  --mars-color-warning: #F59E0B;
+  --mars-color-warning-subtle: rgba(245, 158, 11, 0.15);
+  --mars-color-danger: #EF4444;
+  --mars-color-danger-subtle: rgba(239, 68, 68, 0.15);
+  --mars-color-info: #3B82F6;
+  --mars-color-info-subtle: rgba(59, 130, 246, 0.15);
+
+  /* Console-specific */
+  --mars-color-console-bg: #0D1117;
+  --mars-color-console-text: #E5E5E5;
+
+  /* --- Spacing Scale (4px base) --- */
+  --mars-space-0: 0;
+  --mars-space-1: 0.25rem;   /* 4px */
+  --mars-space-2: 0.5rem;    /* 8px */
+  --mars-space-3: 0.75rem;   /* 12px */
+  --mars-space-4: 1rem;      /* 16px */
+  --mars-space-5: 1.25rem;   /* 20px */
+  --mars-space-6: 1.5rem;    /* 24px */
+  --mars-space-8: 2rem;      /* 32px */
+  --mars-space-10: 2.5rem;   /* 40px */
+  --mars-space-12: 3rem;     /* 48px */
+  --mars-space-16: 4rem;     /* 64px */
+  --mars-space-20: 5rem;     /* 80px */
+
+  /* --- Typography --- */
+  --mars-font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  --mars-font-mono: 'JetBrains Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+
+  --mars-text-xs: 0.75rem;    /* 12px */
+  --mars-text-sm: 0.875rem;   /* 14px */
+  --mars-text-base: 1rem;     /* 16px */
+  --mars-text-lg: 1.125rem;   /* 18px */
+  --mars-text-xl: 1.25rem;    /* 20px */
+  --mars-text-2xl: 1.5rem;    /* 24px */
+  --mars-text-3xl: 1.875rem;  /* 30px */
+  --mars-text-4xl: 2.25rem;   /* 36px */
+
+  --mars-leading-tight: 1.25;
+  --mars-leading-normal: 1.5;
+  --mars-leading-relaxed: 1.75;
+
+  --mars-font-normal: 400;
+  --mars-font-medium: 500;
+  --mars-font-semibold: 600;
+  --mars-font-bold: 700;
+
+  /* --- Border Radius --- */
+  --mars-radius-sm: 4px;
+  --mars-radius-md: 8px;
+  --mars-radius-lg: 12px;
+  --mars-radius-xl: 16px;
+  --mars-radius-full: 9999px;
+
+  /* --- Shadows --- */
+  --mars-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --mars-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --mars-shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --mars-shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+
+  /* --- Z-Index Layers --- */
+  --mars-z-base: 0;
+  --mars-z-dropdown: 100;
+  --mars-z-sticky: 200;
+  --mars-z-nav: 300;
+  --mars-z-modal-backdrop: 400;
+  --mars-z-modal: 500;
+  --mars-z-toast: 600;
+  --mars-z-tooltip: 700;
+  --mars-z-max: 9999;
+
+  /* --- Motion --- */
+  --mars-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --mars-ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --mars-ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --mars-ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  --mars-duration-instant: 50ms;
+  --mars-duration-fast: 150ms;
+  --mars-duration-normal: 200ms;
+  --mars-duration-slow: 300ms;
+  --mars-duration-slower: 500ms;
+
+  /* --- Layout --- */
+  --mars-sidenav-width: 240px;
+  --mars-sidenav-collapsed-width: 64px;
+  --mars-topbar-height: 56px;
+  --mars-content-max-width: 1536px;
+}
+
+/* --------------------------------------------------------------------------
+   3. Light Theme Override
+   Cool slate-blue tint that ties visually to the dark mode's deep blue theme.
+   Surfaces use layered whites for depth; borders are solid for clarity.
+   -------------------------------------------------------------------------- */
+[data-theme="light"] {
+  /* --- Primary (richer blue, good on light bg) --- */
+  --mars-color-primary: #2563EB;
+  --mars-color-primary-hover: #1D4ED8;
+  --mars-color-primary-active: #1E40AF;
+  --mars-color-primary-subtle: rgba(37, 99, 235, 0.08);
+  --mars-color-primary-text: #1E40AF;
+
+  /* --- Accent --- */
+  --mars-color-accent: #059669;
+  --mars-color-accent-hover: #047857;
+  --mars-color-accent-subtle: rgba(5, 150, 105, 0.08);
+
+  /* --- Surfaces (blue-tinted grays for personality) --- */
+  --mars-color-surface: #F8FAFC;
+  --mars-color-surface-raised: #FFFFFF;
+  --mars-color-surface-overlay: #F1F5F9;
+  --mars-color-surface-sunken: #E2E8F0;
+
+  --mars-color-bg: #F8FAFC;
+  --mars-color-bg-secondary: #FFFFFF;
+  --mars-color-bg-tertiary: #F1F5F9;
+  --mars-color-bg-hover: rgba(15, 23, 42, 0.04);
+  --mars-color-bg-active: rgba(15, 23, 42, 0.07);
+
+  /* --- Text (slate palette for cool tone) --- */
+  --mars-color-text: #0F172A;
+  --mars-color-text-secondary: #475569;
+  --mars-color-text-tertiary: #94A3B8;
+  --mars-color-text-disabled: #CBD5E1;
+  --mars-color-text-inverse: #F8FAFC;
+
+  /* --- Borders (solid colors, not transparent — much clearer) --- */
+  --mars-color-border: #E2E8F0;
+  --mars-color-border-strong: #CBD5E1;
+  --mars-color-border-subtle: #F1F5F9;
+
+  /* --- Semantic --- */
+  --mars-color-success: #059669;
+  --mars-color-success-subtle: rgba(5, 150, 105, 0.08);
+  --mars-color-warning: #D97706;
+  --mars-color-warning-subtle: rgba(217, 119, 6, 0.08);
+  --mars-color-danger: #DC2626;
+  --mars-color-danger-subtle: rgba(220, 38, 38, 0.08);
+  --mars-color-info: #2563EB;
+  --mars-color-info-subtle: rgba(37, 99, 235, 0.08);
+
+  /* --- Console (stays dark even in light mode) --- */
+  --mars-color-console-bg: #1E293B;
+  --mars-color-console-text: #E2E8F0;
+
+  /* --- Shadows (more visible to create depth on light bg) --- */
+  --mars-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06), 0 1px 1px rgba(15, 23, 42, 0.04);
+  --mars-shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.08), 0 2px 4px -2px rgba(15, 23, 42, 0.06);
+  --mars-shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+  --mars-shadow-xl: 0 20px 25px -5px rgba(15, 23, 42, 0.10), 0 8px 10px -6px rgba(15, 23, 42, 0.06);
+}
+
+/* --------------------------------------------------------------------------
+   4. Base Typographic Styles
+   -------------------------------------------------------------------------- */
+body {
+  font-family: var(--mars-font-sans);
+  font-size: var(--mars-text-base);
+  line-height: var(--mars-leading-normal);
+  color: var(--mars-color-text);
+  background-color: var(--mars-color-bg);
+}
+
+h1, h2, h3, h4, h5, h6 {
+  line-height: var(--mars-leading-tight);
+  font-weight: var(--mars-font-semibold);
+}
+
+code, pre, kbd, samp {
+  font-family: var(--mars-font-mono);
+}
+
+/* --------------------------------------------------------------------------
+   5. Focus Ring Styles
+   -------------------------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--mars-color-primary);
+  outline-offset: 2px;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* --------------------------------------------------------------------------
+   6. Scrollbar Styles
+   -------------------------------------------------------------------------- */
+.mars-scrollbar::-webkit-scrollbar,
+.console-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.mars-scrollbar::-webkit-scrollbar-track,
+.console-scrollbar::-webkit-scrollbar-track {
+  background: var(--mars-color-surface-sunken);
+}
+
+.mars-scrollbar::-webkit-scrollbar-thumb,
+.console-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--mars-color-text-tertiary);
+  border-radius: var(--mars-radius-full);
+}
+
+.mars-scrollbar::-webkit-scrollbar-thumb:hover,
+.console-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--mars-color-text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   7. Utility Classes
+   -------------------------------------------------------------------------- */
+
+/* Flex Utilities */
+.mars-flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mars-flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mars-flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Grid Utilities */
+.mars-grid {
+  display: grid;
+  gap: var(--mars-space-4);
+}
+
+.mars-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mars-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mars-grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* Visibility Helpers */
+.mars-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.mars-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Animation Helpers */
+.mars-transition {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-timing-function: var(--mars-ease-standard);
+  transition-duration: var(--mars-duration-normal);
+}
+
+.mars-transition-fast {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-timing-function: var(--mars-ease-standard);
+  transition-duration: var(--mars-duration-fast);
+}
+
+/* --------------------------------------------------------------------------
+   8. Existing Animations (migrated)
+   -------------------------------------------------------------------------- */
+@keyframes mars-typing {
+  from { width: 0 }
+  to { width: 100% }
+}
+
+@keyframes mars-blink-caret {
+  from, to { border-color: transparent }
+  50% { border-color: var(--mars-color-accent); }
+}
+
+.typing-animation {
+  overflow: hidden;
+  border-right: 2px solid var(--mars-color-accent);
+  white-space: nowrap;
+  animation:
+    mars-typing 2s steps(40, end),
+    mars-blink-caret .75s step-end infinite;
+}
+
+@keyframes mars-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+@keyframes mars-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes mars-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes mars-slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes mars-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes mars-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes mars-phase-pulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+@keyframes mars-bounce-in {
+  0% { transform: scale(0.9); opacity: 0; }
+  50% { transform: scale(1.02); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+/* --------------------------------------------------------------------------
+   9. Skip-to-Content Link (Accessibility)
+   -------------------------------------------------------------------------- */
+.mars-skip-link {
+  position: absolute;
+  top: -100%;
+  left: var(--mars-space-4);
+  z-index: var(--mars-z-max);
+  padding: var(--mars-space-2) var(--mars-space-4);
+  background-color: var(--mars-color-primary);
+  color: #fff;
+  font-size: var(--mars-text-sm);
+  font-weight: var(--mars-font-semibold);
+  border-radius: var(--mars-radius-md);
+  text-decoration: none;
+  transition: top var(--mars-duration-fast) var(--mars-ease-standard);
+}
+
+.mars-skip-link:focus {
+  top: var(--mars-space-2);
+}
+
+/* --------------------------------------------------------------------------
+   10. Responsive Breakpoints
+   -------------------------------------------------------------------------- */
+
+/* Mobile: < 640px — collapse SideNav fully, stack layouts */
+@media (max-width: 639px) {
+  :root {
+    --mars-sidenav-width: 0px;
+    --mars-sidenav-collapsed-width: 0px;
+    --mars-topbar-height: 48px;
+  }
+
+  .mars-grid-2,
+  .mars-grid-3,
+  .mars-grid-4 {
+    grid-template-columns: 1fr;
+  }
+
+  .mars-hide-mobile {
+    display: none !important;
+  }
+}
+
+/* Tablet: 640px – 1023px — collapse SideNav by default */
+@media (min-width: 640px) and (max-width: 1023px) {
+  :root {
+    --mars-sidenav-width: 200px;
+  }
+
+  .mars-grid-4 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mars-hide-tablet {
+    display: none !important;
+  }
+}
+
+/* Desktop: 1024px+ — full layout */
+@media (min-width: 1024px) {
+  .mars-show-mobile-only {
+    display: none !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   11. Live Region for Screen Readers
+   -------------------------------------------------------------------------- */
+.mars-live-region {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* --------------------------------------------------------------------------
+   12. Console Log Styling (Stage 11)
+   -------------------------------------------------------------------------- */
+.mars-log-entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--mars-space-2);
+  padding: var(--mars-space-1) var(--mars-space-3);
+  font-family: var(--mars-font-mono);
+  font-size: var(--mars-text-xs);
+  line-height: 1.6;
+  border-left: 2px solid transparent;
+  transition: background-color var(--mars-duration-fast) var(--mars-ease-standard);
+}
+
+.mars-log-entry:hover {
+  background-color: rgba(255, 255, 255, 0.03);
+}
+
+.mars-log-entry[data-level="error"] {
+  border-left-color: var(--mars-color-danger);
+  background-color: var(--mars-color-danger-subtle);
+}
+
+.mars-log-entry[data-level="warning"] {
+  border-left-color: var(--mars-color-warning);
+  background-color: var(--mars-color-warning-subtle);
+}
+
+.mars-log-entry[data-level="success"] {
+  border-left-color: var(--mars-color-success);
+}
+
+.mars-log-entry .mars-log-timestamp {
+  color: var(--mars-color-text-tertiary);
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  min-width: 5ch;
+}
+
+.mars-log-entry .mars-log-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.mars-log-entry .mars-log-agent-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--mars-space-1);
+  font-size: 0.65rem;
+  font-weight: var(--mars-font-semibold);
+  border-radius: var(--mars-radius-sm);
+  background-color: var(--mars-color-primary-subtle);
+  color: var(--mars-color-primary-text);
+  white-space: nowrap;
+  flex-shrink: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.mars-log-entry .mars-log-message {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--mars-color-console-text);
+}
+
+.mars-log-entry .mars-log-code-block {
+  margin-top: var(--mars-space-1);
+  padding: var(--mars-space-2);
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: var(--mars-radius-sm);
+  overflow-x: auto;
+  font-size: var(--mars-text-xs);
+}
+
+.mars-phase-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--mars-space-2);
+  padding: var(--mars-space-2) var(--mars-space-3);
+  margin: var(--mars-space-1) 0;
+  font-family: var(--mars-font-sans);
+  font-size: var(--mars-text-xs);
+  font-weight: var(--mars-font-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--mars-color-primary-text);
+  border-radius: var(--mars-radius-sm);
+  background: linear-gradient(90deg, var(--mars-color-primary-subtle), transparent);
+}
+
+.mars-phase-indicator .mars-phase-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--mars-color-primary);
+}
+
+.mars-phase-indicator.mars-phase-active .mars-phase-dot {
+  animation: mars-phase-pulse 1.5s ease-in-out infinite;
+}
+
+/* --------------------------------------------------------------------------
+   13. Markdown Rendering (Stage 12)
+   -------------------------------------------------------------------------- */
+.mars-markdown {
+  color: var(--mars-color-text);
+  line-height: var(--mars-leading-relaxed);
+  font-size: var(--mars-text-sm);
+}
+
+.mars-markdown h1,
+.mars-markdown h2,
+.mars-markdown h3,
+.mars-markdown h4 {
+  margin-top: var(--mars-space-6);
+  margin-bottom: var(--mars-space-3);
+  font-weight: var(--mars-font-semibold);
+  color: var(--mars-color-text);
+}
+
+.mars-markdown h1 { font-size: var(--mars-text-2xl); }
+.mars-markdown h2 { font-size: var(--mars-text-xl); border-bottom: 1px solid var(--mars-color-border); padding-bottom: var(--mars-space-2); }
+.mars-markdown h3 { font-size: var(--mars-text-lg); }
+.mars-markdown h4 { font-size: var(--mars-text-base); }
+
+.mars-markdown p {
+  margin-bottom: var(--mars-space-3);
+}
+
+.mars-markdown ul,
+.mars-markdown ol {
+  margin-bottom: var(--mars-space-3);
+  padding-left: var(--mars-space-6);
+}
+
+.mars-markdown li {
+  margin-bottom: var(--mars-space-1);
+}
+
+.mars-markdown code {
+  font-family: var(--mars-font-mono);
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  background-color: var(--mars-color-surface-overlay);
+  border-radius: var(--mars-radius-sm);
+  color: var(--mars-color-primary-text);
+}
+
+.mars-markdown pre {
+  margin-bottom: var(--mars-space-4);
+  padding: var(--mars-space-4);
+  background-color: var(--mars-color-console-bg);
+  border-radius: var(--mars-radius-md);
+  overflow-x: auto;
+  border: 1px solid var(--mars-color-border);
+}
+
+.mars-markdown pre code {
+  padding: 0;
+  background: none;
+  font-size: var(--mars-text-xs);
+  color: var(--mars-color-console-text);
+}
+
+.mars-markdown blockquote {
+  margin-bottom: var(--mars-space-3);
+  padding: var(--mars-space-2) var(--mars-space-4);
+  border-left: 3px solid var(--mars-color-primary);
+  background-color: var(--mars-color-primary-subtle);
+  border-radius: 0 var(--mars-radius-sm) var(--mars-radius-sm) 0;
+  color: var(--mars-color-text-secondary);
+}
+
+.mars-markdown table {
+  width: 100%;
+  margin-bottom: var(--mars-space-4);
+  border-collapse: collapse;
+}
+
+.mars-markdown th,
+.mars-markdown td {
+  padding: var(--mars-space-2) var(--mars-space-3);
+  border: 1px solid var(--mars-color-border);
+  text-align: left;
+  font-size: var(--mars-text-sm);
+}
+
+.mars-markdown th {
+  background-color: var(--mars-color-surface-overlay);
+  font-weight: var(--mars-font-semibold);
+}
+
+.mars-markdown a {
+  color: var(--mars-color-primary-text);
+  text-decoration: underline;
+}
+
+.mars-markdown a:hover {
+  color: var(--mars-color-primary);
+}
+
+.mars-markdown hr {
+  margin: var(--mars-space-6) 0;
+  border: none;
+  border-top: 1px solid var(--mars-color-border);
+}
+
+/* --------------------------------------------------------------------------
+   14. File Viewer Styling (Stage 12)
+   -------------------------------------------------------------------------- */
+.mars-file-viewer {
+  border: 1px solid var(--mars-color-border);
+  border-radius: var(--mars-radius-md);
+  overflow: hidden;
+  background-color: var(--mars-color-surface-raised);
+}
+
+.mars-file-viewer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--mars-space-2) var(--mars-space-3);
+  background-color: var(--mars-color-surface-overlay);
+  border-bottom: 1px solid var(--mars-color-border);
+  font-size: var(--mars-text-xs);
+  font-family: var(--mars-font-mono);
+  color: var(--mars-color-text-secondary);
+}
+
+.mars-file-viewer-body {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.mars-csv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--mars-text-xs);
+  font-family: var(--mars-font-mono);
+}
+
+.mars-csv-table th {
+  position: sticky;
+  top: 0;
+  padding: var(--mars-space-2) var(--mars-space-3);
+  background-color: var(--mars-color-surface-overlay);
+  border-bottom: 2px solid var(--mars-color-border-strong);
+  font-weight: var(--mars-font-semibold);
+  text-align: left;
+  color: var(--mars-color-text);
+  white-space: nowrap;
+}
+
+.mars-csv-table td {
+  padding: var(--mars-space-1) var(--mars-space-3);
+  border-bottom: 1px solid var(--mars-color-border-subtle);
+  color: var(--mars-color-text-secondary);
+  white-space: nowrap;
+}
+
+.mars-csv-table tr:hover td {
+  background-color: var(--mars-color-bg-hover);
+}
