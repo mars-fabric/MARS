@@ -168,59 +168,59 @@ Don't suggest to perform any calculations or analyses here. The only goal of thi
   const getExampleTasks = (mode: string) => {
     if (mode === 'idea-generation') {
       return [
-        'Customer transaction history from a retail bank with 50,000 accounts',
-        'Bank loan application dataset with credit scores, income, and default outcomes',
-        'Cross-border payment latency and fee data from correspondent banking networks'
+        'Generate synthetic retail banking customer profiles (age, income, account balance, tenure) and explore segmentation ideas',
+        'Simulate a loan portfolio with synthetic credit scores and default flags, then brainstorm risk modelling approaches',
+        'Create synthetic cross-channel transaction data (branch, ATM, mobile, online) and propose AI ops improvement ideas'
       ]
     } else if (mode === 'hitl-interactive') {
       return [
-        'Build a stress-test model for bank capital under adverse macroeconomic scenarios',
-        'Design a real-time fraud alert system and visualize transaction network patterns',
-        'Develop a customer lifetime value model for a retail banking portfolio'
+        'Generate synthetic bank customer churn data and build a logistic regression churn predictor with a classification report',
+        'Simulate a loan portfolio using numpy, compute expected loss by risk tier, and plot the loss distribution',
+        'Create synthetic daily transaction volume data for 12 branches and build an anomaly detection model using z-scores'
       ]
     } else if (mode === 'copilot') {
       return [
-        'Explain the difference between Basel II and Basel III capital requirements',
-        'Write a Python function to calculate XIRR for a series of loan repayment cash flows',
-        'Debug this credit scoring pipeline and add cross-validation with stratified splits'
+        'Explain the key differences between Basel II, Basel III, and Basel IV capital requirements for a retail bank',
+        'Write a Python function that generates a synthetic amortization schedule for a fixed-rate mortgage and plots monthly payments',
+        'Explain how AI is used in Know Your Customer (KYC) automation and what risks it introduces for compliance teams'
       ]
     } else if (mode === 'ocr') {
       return [
-        '/path/to/bank_statements_scan.pdf',
+        '/path/to/bank_statement_scan.pdf',
         '/path/to/loan_agreement_signed.png',
         '/path/to/kyc_documents_batch/'
       ]
     } else if (mode === 'arxiv') {
       return [
-        'What are the key findings in https://arxiv.org/abs/2412.07626 on credit risk modelling?',
-        'Summarize the methodology of https://arxiv.org/abs/2309.02041 on fraud detection using graph neural networks',
-        'Explain the approach in https://arxiv.org/abs/2006.11239 on systemic risk in interbank networks'
+        'What are the key findings in https://arxiv.org/abs/2412.07626 on machine learning for credit risk?',
+        'Summarize the methodology of https://arxiv.org/abs/2309.02041 on graph neural networks for fraud detection',
+        'Explain the approach in https://arxiv.org/abs/2006.11239 on systemic risk modelling in interbank networks'
       ]
     } else if (mode === 'enhance-input') {
       return [
-        'Explore ML-based credit scoring models — see https://arxiv.org/abs/2104.03456 — and relate to recent regulatory guidance on explainable AI in lending.',
-        'My hypothesis on BNPL default risk combined with the paper at https://arxiv.org/abs/2203.07651 on consumer credit behaviour during economic shocks.',
-        'What does this work on graph-based AML detection https://arxiv.org/abs/2107.01178 imply for real-time transaction monitoring at scale?'
+        'Explore explainable AI credit scoring for retail banks — see https://arxiv.org/abs/2104.03456 — and relate to current US fair lending regulations.',
+        'My hypothesis on AI-driven AML transaction monitoring combined with the paper at https://arxiv.org/abs/2107.01178 on graph-based money laundering detection.',
+        'What does this work on transformer models for financial time series https://arxiv.org/abs/2001.08361 imply for real-time fraud scoring at Citizens Bank scale?'
       ]
     } else if (mode === 'planning-control') {
       return [
-        'Investigate the impact of interest rate hikes on mortgage default rates and housing affordability',
-        'Build a comprehensive credit scoring model incorporating alternative data for underbanked populations',
-        'Research the effectiveness of AI-driven anti-money laundering transaction monitoring systems',
-        'Analyze open banking API adoption and its competitive impact on traditional retail banks',
-        'Study Basel III capital requirements and their effect on SME lending capacity',
-        'Evaluate real-time fraud detection strategies in instant payment networks',
-        'Research BNPL risk models and their systemic implications for consumer lending markets'
+        'Research AI-driven fraud detection strategies used by leading retail banks and summarize implementation best practices',
+        'Investigate how open banking APIs are reshaping customer experience and competitive dynamics for mid-size US banks',
+        'Analyze the regulatory landscape for AI in credit decisioning under ECOA and fair lending laws in the US',
+        'Research customer churn drivers in retail banking and evaluate AI-based retention strategies used by top banks',
+        'Study the cost and ROI of deploying AI chatbots for customer service in retail and commercial banking',
+        'Investigate Basel IV capital requirements and their projected impact on lending capacity for US regional banks',
+        'Research real-time payment fraud detection approaches in instant payment networks like FedNow and RTP'
       ]
     }
-    // one-shot default — banking use cases
+    // one-shot default — self-contained banking + AI ops tasks (no external data files needed)
     return [
-      'Analyze monthly credit card transaction data and flag anomalies by merchant category',
-      'Calculate loan default probability using logistic regression on customer credit profiles',
-      'Plot mortgage approval rate distribution across zip codes and identify disparity patterns',
-      'Compute Value-at-Risk (VaR) for a retail banking portfolio using historical simulation',
-      'Analyze customer churn in a retail bank dataset and identify the top five risk factors',
-      'Generate a report on ATM usage patterns and optimal cash replenishment schedules'
+      'Generate 500 synthetic bank transactions using numpy, flag outliers by z-score, and plot flagged vs normal transactions',
+      'Simulate a 30-year fixed mortgage amortization schedule in Python and plot the principal vs interest breakdown per year',
+      'Generate synthetic customer credit scores (300-850) for 1000 customers, bin by risk tier, and plot the distribution',
+      'Simulate daily ATM cash withdrawals for 10 branches over 90 days using numpy and identify the top 3 busiest branches',
+      'Generate synthetic loan default data using logistic probabilities, train a simple classifier, and print a classification report',
+      'Simulate a retail banking customer base with account balances and tenure, compute RFM scores, and visualize segments'
     ]
   }
 
