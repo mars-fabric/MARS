@@ -57,7 +57,7 @@ backend/
 ### Frontend (Next.js/React/TypeScript)
 
 ```
-cmbagent-ui/
+mars-ui/
 ├── contexts/
 │   ├── WebSocketContext.tsx       # WebSocket and session state
 │   └── ParallelSessionsContext.tsx # Multi-tab session management
@@ -497,7 +497,7 @@ GET /api/sessions/{session_id}/runs?limit=50&offset=0
 
 ### 1. WebSocket Context
 
-**File:** `cmbagent-ui/contexts/WebSocketContext.tsx`
+**File:** `mars-ui/contexts/WebSocketContext.tsx`
 
 The main React context for managing WebSocket connections and session state.
 
@@ -608,7 +608,7 @@ const loadSessionHistory = useCallback(async (sessionId: string) => {
 
 ### 2. Parallel Sessions Context
 
-**File:** `cmbagent-ui/contexts/ParallelSessionsContext.tsx`
+**File:** `mars-ui/contexts/ParallelSessionsContext.tsx`
 
 Manages multiple session tabs in the UI.
 
@@ -646,7 +646,7 @@ interface ParallelSessionsContextValue {
 
 ### 3. Session List UI
 
-**File:** `cmbagent-ui/components/sessions/SessionScreen.tsx`
+**File:** `mars-ui/components/sessions/SessionScreen.tsx`
 
 The main sessions management page.
 
@@ -693,7 +693,7 @@ The main sessions management page.
 
 ### 4. Session Detail Panel
 
-**File:** `cmbagent-ui/components/SessionManager/SessionDetailPanel.tsx`
+**File:** `mars-ui/components/SessionManager/SessionDetailPanel.tsx`
 
 Shows detailed session information with tabbed interface.
 
@@ -1386,7 +1386,7 @@ Environment variables:
 
 ### Frontend Configuration
 
-**File:** `cmbagent-ui/lib/config.ts`
+**File:** `mars-ui/lib/config.ts`
 
 Environment variables:
 - `NEXT_PUBLIC_API_URL` - Backend API URL (default: http://localhost:8000)
@@ -1761,10 +1761,10 @@ All endpoints validate inputs:
 - `backend/websocket/handlers.py:51-227` - WebSocket handler
 
 **Frontend:**
-- `cmbagent-ui/contexts/WebSocketContext.tsx` - WebSocket state
-- `cmbagent-ui/contexts/ParallelSessionsContext.tsx` - Multi-tab management
-- `cmbagent-ui/components/sessions/SessionScreen.tsx` - Session list UI
-- `cmbagent-ui/components/SessionManager/SessionDetailPanel.tsx` - Detail view
+- `mars-ui/contexts/WebSocketContext.tsx` - WebSocket state
+- `mars-ui/contexts/ParallelSessionsContext.tsx` - Multi-tab management
+- `mars-ui/components/sessions/SessionScreen.tsx` - Session list UI
+- `mars-ui/components/SessionManager/SessionDetailPanel.tsx` - Detail view
 
 **Database:**
 - `cmbagent/database/models.py:24-117` - Session models
@@ -1815,12 +1815,12 @@ The current multi-tab session management adds significant complexity:
 #### 1. Remove Frontend Components
 
 **Delete these files:**
-- `cmbagent-ui/contexts/ParallelSessionsContext.tsx` - Entire multi-tab context
-- `cmbagent-ui/components/layout/SessionTabBar.tsx` - Tab bar UI
+- `mars-ui/contexts/ParallelSessionsContext.tsx` - Entire multi-tab context
+- `mars-ui/components/layout/SessionTabBar.tsx` - Tab bar UI
 
 **Simplify these files:**
-- `cmbagent-ui/app/page.tsx` - Remove tab switching logic, use WebSocket state directly
-- `cmbagent-ui/app/providers.tsx` - Remove `ParallelSessionsProvider`
+- `mars-ui/app/page.tsx` - Remove tab switching logic, use WebSocket state directly
+- `mars-ui/app/providers.tsx` - Remove `ParallelSessionsProvider`
 
 #### 2. Simplified State Management
 
@@ -1920,12 +1920,12 @@ The simplification is **frontend-only**.
 
 **Step 1: Remove ParallelSessionsContext**
 ```bash
-rm cmbagent-ui/contexts/ParallelSessionsContext.tsx
+rm mars-ui/contexts/ParallelSessionsContext.tsx
 ```
 
 **Step 2: Remove SessionTabBar**
 ```bash
-rm cmbagent-ui/components/layout/SessionTabBar.tsx
+rm mars-ui/components/layout/SessionTabBar.tsx
 ```
 
 **Step 3: Update providers.tsx**
@@ -2085,8 +2085,8 @@ To implement single-session approach:
 git checkout -b feature/single-session-simplification
 
 # 2. Remove multi-tab files
-git rm cmbagent-ui/contexts/ParallelSessionsContext.tsx
-git rm cmbagent-ui/components/layout/SessionTabBar.tsx
+git rm mars-ui/contexts/ParallelSessionsContext.tsx
+git rm mars-ui/components/layout/SessionTabBar.tsx
 
 # 3. Update providers and page.tsx
 # (Manual refactoring needed)

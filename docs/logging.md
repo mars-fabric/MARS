@@ -1,6 +1,6 @@
 # Logging
 
-This document covers all logging patterns, configuration, and conventions used across the three layers of the CMBAgent project: the **cmbagent core library** (Python), the **backend** (FastAPI), and the **cmbagent-ui** (Next.js frontend).
+This document covers all logging patterns, configuration, and conventions used across the three layers of the CMBAgent project: the **cmbagent core library** (Python), the **backend** (FastAPI), and the **mars-ui** (Next.js frontend).
 
 ---
 
@@ -30,7 +30,7 @@ This document covers all logging patterns, configuration, and conventions used a
   - [OrchestratorLogger](#orchestratorlogger)
   - [Debug Utilities](#debug-utilities)
   - [Workflow Callbacks Logger](#workflow-callbacks-logger)
-- [Frontend Logging (cmbagent-ui)](#frontend-logging-cmbagent-ui)
+- [Frontend Logging (mars-ui)](#frontend-logging-mars-ui)
   - [Console Methods Used](#console-methods-used)
   - [Debug Configuration](#debug-configuration)
 - [Log Levels](#log-levels)
@@ -560,7 +560,7 @@ print_callbacks = WorkflowCallbacks(
 
 ---
 
-## Frontend Logging (cmbagent-ui)
+## Frontend Logging (mars-ui)
 
 ### Console Methods Used
 
@@ -595,7 +595,7 @@ Most frontend log messages use a `[WebSocket]` prefix for easy filtering in brow
 
 ### Debug Configuration
 
-**File:** `cmbagent-ui/lib/config.ts`
+**File:** `mars-ui/lib/config.ts`
 
 ```typescript
 debug: process.env.NEXT_PUBLIC_DEBUG === 'true',

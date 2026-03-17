@@ -1,6 +1,6 @@
 # Dependencies
 node_modules/
-cmbagent-ui/node_modules/
+mars-ui/node_modules/
 cmbagent_env/
 __pycache__/
 *.pyc

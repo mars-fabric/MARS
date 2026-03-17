@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  cmbagent-ui:
+  mars-ui:
     build:
       context: .
       dockerfile: Dockerfile.nextjs

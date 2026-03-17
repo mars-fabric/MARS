@@ -176,7 +176,7 @@ cmbagent/
 │           ├── paper_node.py                # All section-writing nodes
 │           └── LaTeX/                       # Journal-specific templates (.cls, .bst, .sty)
 │
-├── cmbagent-ui/
+├── mars-ui/
 │   ├── app/tasks/page.tsx                   # Task routing page
 │   ├── types/deepresearch.ts                     # TypeScript type definitions
 │   ├── hooks/useDeepresearchTask.ts              # React hook for Deepresearch state management
@@ -1048,7 +1048,7 @@ Three prompts, all injected with `{research_idea}` and `{methodology}`:
 
 ### 11.1 Type Definitions
 
-**Source:** `cmbagent-ui/types/deepresearch.ts`
+**Source:** `mars-ui/types/deepresearch.ts`
 
 Key types:
 
@@ -1077,7 +1077,7 @@ STAGE_SHARED_KEYS = { 1: 'research_idea', 2: 'methodology', 3: 'results' }
 
 ### 11.2 State Management Hook
 
-**Source:** `cmbagent-ui/hooks/useDeepresearchTask.ts`
+**Source:** `mars-ui/hooks/useDeepresearchTask.ts`
 
 The `useDeepresearchTask()` hook encapsulates all Deepresearch client-side logic:
 
@@ -1113,7 +1113,7 @@ The `useDeepresearchTask()` hook encapsulates all Deepresearch client-side logic
 
 ### 11.3 Wizard Container
 
-**Source:** `cmbagent-ui/components/tasks/DeepresearchResearchTask.tsx`
+**Source:** `mars-ui/components/tasks/DeepresearchResearchTask.tsx`
 
 The main component renders a 5-step wizard using a `Stepper` component:
 
@@ -1131,7 +1131,7 @@ The stepper dynamically reflects real stage statuses from `taskState`.
 
 ### 11.4 Panel Components
 
-**Source:** `cmbagent-ui/components/deepresearch/`
+**Source:** `mars-ui/components/deepresearch/`
 
 #### SetupPanel (`SetupPanel.tsx`)
 
@@ -1287,7 +1287,7 @@ The frontend uses REST polling for console output to avoid duplication, and WebS
 
 ## 14. Task Resumption
 
-**Source:** `cmbagent-ui/hooks/useDeepresearchTask.ts:335-370`
+**Source:** `mars-ui/hooks/useDeepresearchTask.ts:335-370`
 
 Deepresearch tasks can be resumed after page reloads or interruptions:
 

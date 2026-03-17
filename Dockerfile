@@ -2,16 +2,16 @@
 FROM node:18-slim AS frontend-builder
 
 # Set working directory for frontend
-WORKDIR /app/cmbagent-ui
+WORKDIR /app/mars-ui
 
 # Copy package files
-COPY cmbagent-ui/package*.json ./
+COPY mars-ui/package*.json ./
 
 # Install dependencies
 RUN npm ci --only=production
 
 # Copy frontend source
-COPY cmbagent-ui/ ./
+COPY mars-ui/ ./
 
 # Build the Next.js application
 RUN npm run build
@@ -55,16 +55,16 @@ RUN pip install --no-cache-dir -e .
 COPY backend/ ./backend/
 
 # Copy built frontend from builder stage
-COPY --from=frontend-builder /app/cmbagent-ui/.next ./cmbagent-ui/.next
-COPY --from=frontend-builder /app/cmbagent-ui/package*.json ./cmbagent-ui/
-COPY --from=frontend-builder /app/cmbagent-ui/next.config.js ./cmbagent-ui/
-COPY --from=frontend-builder /app/cmbagent-ui/node_modules ./cmbagent-ui/node_modules
+COPY --from=frontend-builder /app/mars-ui/.next ./mars-ui/.next
+COPY --from=frontend-builder /app/mars-ui/package*.json ./mars-ui/
+COPY --from=frontend-builder /app/mars-ui/next.config.js ./mars-ui/
+COPY --from=frontend-builder /app/mars-ui/node_modules ./mars-ui/node_modules
 
 # Create startup script for Hugging Face Spaces
 RUN echo '#!/bin/bash\n\
 cd /app/backend && python run.py &\n\
 BACKEND_PID=$!\n\
-cd /app/cmbagent-ui && ./node_modules/.bin/next start -p 7860 &\n\
+cd /app/mars-ui && ./node_modules/.bin/next start -p 7860 &\n\
 FRONTEND_PID=$!\n\
 echo "🚀 CMBAgent UI available at http://localhost:7860"\n\
 echo "📡 Backend API available at http://localhost:8000"\n\

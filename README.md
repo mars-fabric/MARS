@@ -414,7 +414,7 @@ pip install -e ".[data]"       # Optional: scipy, matplotlib, xgboost
 pip install -e ".[jupyter]"    # Optional: Jupyter support
 
 # Frontend
-cd cmbagent-ui && npm install && cd ..
+cd mars-ui && npm install && cd ..
 ```
 
 ### Configure
@@ -429,7 +429,7 @@ MISTRAL_API_KEY=your-mistral-api-key         # optional
 ```
 
 ```bash
-# cmbagent-ui/.env.local
+# mars-ui/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
@@ -441,7 +441,7 @@ cd backend && python run.py
 # → http://localhost:8000  |  Docs: http://localhost:8000/docs
 
 # Terminal 2 — Frontend
-cd cmbagent-ui && npm run dev
+cd mars-ui && npm run dev
 # → http://localhost:3000
 ```
 

@@ -85,13 +85,13 @@ tests/Project*
 project_dir
 
 # Frontend / Node.js
-cmbagent-ui/node_modules/
-cmbagent-ui/.next/
-cmbagent-ui/out/
-cmbagent-ui/.env.local
-cmbagent-ui/.env.development.local
-cmbagent-ui/.env.test.local
-cmbagent-ui/.env.production.local
+mars-ui/node_modules/
+mars-ui/.next/
+mars-ui/out/
+mars-ui/.env.local
+mars-ui/.env.development.local
+mars-ui/.env.test.local
+mars-ui/.env.production.local
 
 # Test files
 test_*.py

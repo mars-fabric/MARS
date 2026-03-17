@@ -74,7 +74,7 @@ def run_next_gui():
     # Get the package root directory
     package_root = Path(cmbagent_spec.origin).parent.parent
     backend_path = package_root / "backend"
-    frontend_path = package_root / "cmbagent-ui"
+    frontend_path = package_root / "mars-ui"
 
     # Check if this is a development installation or pip installation
     is_editable_install = (package_root / ".git").exists() or "site-packages" not in str(package_root)
@@ -83,12 +83,12 @@ def run_next_gui():
     if not backend_path.exists() or not frontend_path.exists():
         logger.error("nextjs_ui_not_found")
         if is_editable_install:
-            logger.info("nextjs_dev_install_missing", hint="Build the frontend: cd cmbagent-ui && npm install && npm run build")
+            logger.info("nextjs_dev_install_missing", hint="Build the frontend: cd mars-ui && npm install && npm run build")
         else:
             logger.info("nextjs_not_in_pip", hint="The Next.js interface is not available in the pip-installed version")
         logger.info("nextjs_install_options",
-                     option1="Install from source: git clone, pip install -e ., cd cmbagent-ui && npm install && npm run build",
-                     option2="Use Docker: docker pull docker.io/borisbolliet/cmbagent-ui:latest",
+                     option1="Install from source: git clone, pip install -e ., cd mars-ui && npm install && npm run build",
+                     option2="Use Docker: docker pull docker.io/borisbolliet/mars-ui:latest",
                      option3="Use Streamlit: cmbagent run --streamlit",
                      option4="HuggingFace Spaces: https://huggingface.co/spaces/astropilot-ai/cmbagent")
         sys.exit(1)

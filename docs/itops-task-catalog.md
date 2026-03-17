@@ -1625,7 +1625,7 @@ Just paste the pre-filled description into the SetupPanel text area and upload t
 If `VerticalPicker.tsx` is already implemented from the industry-verticals catalog, add ITOps as a vertical:
 
 ```typescript
-// In cmbagent-ui/lib/verticalTasks.ts — add to INDUSTRY_VERTICALS array:
+// In mars-ui/lib/verticalTasks.ts — add to INDUSTRY_VERTICALS array:
 {
   id: 'itops',
   name: 'IT Operations',
