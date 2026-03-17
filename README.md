@@ -1,524 +1,551 @@
-# MARS - Multi-Agent Research System
+<p align="center">
+  <h1 align="center">MARS</h1>
+  <p align="center"><strong>Multi-Agent Research System</strong></p>
+  <p align="center">
+    Turn complex work into automated, multi-agent workflows.<br/>
+    From market insights to research papers — define a task, pick a mode, let the agents deliver.
+  </p>
+</p>
 
-A multi-agent system for autonomous discovery in cosmology and astrophysics research. Built by cosmologists, powered by [AG2](https://github.com/ag2ai/ag2) (AutoGen 2). MARS orchestrates 50+ specialized AI agents that plan, execute code, retrieve research papers, and collaborate to solve complex scientific problems.
+<p align="center">
+  <a href="#-modes">Modes</a> &nbsp;&bull;&nbsp;
+  <a href="#-tasks">Tasks</a> &nbsp;&bull;&nbsp;
+  <a href="#-what-you-can-build">Use Cases</a> &nbsp;&bull;&nbsp;
+  <a href="#-getting-started">Getting Started</a> &nbsp;&bull;&nbsp;
+  <a href="#-architecture">Architecture</a>
+</p>
 
-## Table of Contents
+<br/>
 
-- [Architecture Overview](#architecture-overview)
-- [Tech Stack](#tech-stack)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Running the Application](#running-the-application)
-- [Docker Deployment](#docker-deployment)
-- [Project Structure](#project-structure)
-- [Backend API](#backend-api)
-- [Frontend UI](#frontend-ui)
-- [Agent System](#agent-system)
-- [Workflow Types](#workflow-types)
-- [Database](#database)
-- [External Tools](#external-tools)
-- [Testing](#testing)
-- [License](#license)
+> **MARS** orchestrates **50+ specialized AI agents** — planners, coders, researchers, reviewers, web surfers, OCR processors — powered by [AG2](https://github.com/ag2ai/ag2) (AutoGen 2). Give it a task, choose how agents should work (the _mode_), and get back deliverables: reports, code reviews, research papers, product strategies, weekly briefings, or anything you can define.
+
+<br/>
+
+## Why MARS?
+
+Complex work involves too many steps — gathering information, analyzing data, writing reports, iterating on feedback. MARS handles the heavy lifting so you can focus on decisions that matter.
+
+<table>
+<tr>
+<td width="50%">
+
+**8 composable modes**
+Single-pass, multi-step planning, hypothesis generation, document extraction, literature review, input enrichment, human-in-the-loop, copilot. Mix and match to build any workflow.
+
+</td>
+<td width="50%">
+
+**50+ specialized agents**
+Planning, coding, web search, literature retrieval, critical evaluation, and document processing — orchestrated in pipelines that carry context across every phase.
+
+</td>
+</tr>
+<tr>
+<td>
+
+**Pre-built tasks, unlimited custom ones**
+Ship with templates for deep research, AI weekly reports, code review, product discovery, and release notes. Build your own with the Task Builder.
+
+</td>
+<td>
+
+**Human-in-the-loop or fully autonomous**
+Review and approve agent plans at every step, or let MARS run end-to-end on its own. Your choice, per task.
+
+</td>
+</tr>
+</table>
+
+<br/>
 
 ---
 
-## Architecture Overview
+<br/>
 
-MARS is composed of three main layers:
+## 🔀 Modes
 
-```
-┌─────────────────────────────────────────────────┐
-│                  Frontend (UI)                   │
-│           Next.js 14 / React 18 / TailwindCSS    │
-│     Real-time updates via Socket.IO, DAG viz     │
-├─────────────────────────────────────────────────┤
-│                 Backend (API)                    │
-│          FastAPI / Uvicorn / WebSockets           │
-│   REST endpoints, task execution, event stream   │
-├─────────────────────────────────────────────────┤
-│              Agent Framework (Core)              │
-│           AG2 multi-agent orchestration           │
-│   50+ specialized agents, DAG execution, RAG     │
-├─────────────────────────────────────────────────┤
-│               Storage & Data                     │
-│     SQLAlchemy (SQLite/PostgreSQL) + Alembic      │
-│       File tracking, cost records, events        │
-└─────────────────────────────────────────────────┘
-```
+Modes define _how_ agents approach a task. They are the building blocks — combine any mode with different agents and configurations to create unlimited automated workflows.
+
+<br/>
+
+<table>
+<tr>
+<td><strong>Mode</strong></td>
+<td><strong>What It Does</strong></td>
+<td><strong>Good For</strong></td>
+</tr>
+
+<tr>
+<td>
+
+**Single-Pass Analysis**<br/>`one-shot`
+
+</td>
+<td>One agent, one pass, no iterative planning. Fast and direct.</td>
+<td>Quick analysis, code gen, report drafts, release notes, one-off scripts</td>
+</tr>
+
+<tr>
+<td>
+
+**Multi-Step Research**<br/>`planning-control`
+
+</td>
+<td>Planner creates a plan, reviewer validates, execution agents carry it out step by step with context across phases.</td>
+<td>Market research, competitive intelligence, technical investigations, multi-part analyses</td>
+</tr>
+
+<tr>
+<td>
+
+**Hypothesis Generation**<br/>`idea-generation`
+
+</td>
+<td><code>idea_maker</code> proposes, <code>idea_hater</code> critiques — adversarial loop that stress-tests ideas before you commit.</td>
+<td>Product brainstorming, strategic planning, research directions, design exploration</td>
+</tr>
+
+<tr>
+<td>
+
+**Document Extraction**<br/>`ocr`
+
+</td>
+<td>Mistral OCR extracts structured text from PDFs, scans, handwritten notes, and figures.</td>
+<td>Digitizing documents, extracting tables from reports, processing scanned records</td>
+</tr>
+
+<tr>
+<td>
+
+**Literature Review**<br/>`arxiv`
+
+</td>
+<td>Downloads papers, extracts content, summarizes findings and citations.</td>
+<td>Lit reviews, finding related work, surveying a field, annotated bibliographies</td>
+</tr>
+
+<tr>
+<td>
+
+**Input Enrichment**<br/>`enhance-input`
+
+</td>
+<td>Auto-downloads referenced documents, runs OCR and summarization, enriches your input before agents start working.</td>
+<td>Tasks with external references, multi-source context, pre-processing for deeper analysis</td>
+</tr>
+
+<tr>
+<td>
+
+**Human-in-the-Loop**<br/>`hitl-interactive`
+
+</td>
+<td>Approval checkpoints at every decision point. Agents propose, you approve, then they execute.</td>
+<td>High-stakes work, expert-guided analysis, exploratory research, full-control workflows</td>
+</tr>
+
+<tr>
+<td>
+
+**Copilot Chat**<br/>`copilot`
+
+</td>
+<td>Conversational interface with persistent context. Ask follow-ups, redirect, iterate in real time.</td>
+<td>Exploratory analysis, iterative problem-solving, rapid prototyping, guided sessions</td>
+</tr>
+</table>
+
+<br/>
+
+<details>
+<summary><strong>Copilot workflow presets</strong></summary>
+<br/>
+
+| Preset | Behavior |
+|--------|----------|
+| **Copilot Assistant** | Adapts to complexity. Plans when needed, asks approval after each step. |
+| **Interactive Session** | Continuous back-and-forth. Up to 50 turns. |
+| **Quick Task** | Direct execution. No planning, no approval. |
+| **Interactive Copilot** | Proposes actions first, waits for your input before executing. |
+
+</details>
+
+<br/>
 
 ---
 
-## Tech Stack
+<br/>
+
+## 📋 Tasks
+
+Tasks are where modes become **deliverables**. Each task = a mode + agents + configuration = a specific output. MARS ships with pre-built templates, and the Task Builder lets you create as many custom ones as you need.
+
+<br/>
+
+### Pre-Built Templates
+
+<table>
+<tr>
+<td width="20%"><strong>Deep Scientific Research</strong></td>
+<td width="20%"><code>deep-research</code></td>
+<td>4-stage pipeline: idea generation → method development → experiments → LaTeX paper. Adversarial review built in. Review and refine between every stage.</td>
+</tr>
+<tr>
+<td><strong>AI Weekly Report</strong></td>
+<td><code>hitl-interactive</code></td>
+<td>Weekly technology briefings with human approval at each step. Planner outlines, researcher gathers, engineer compiles.</td>
+</tr>
+<tr>
+<td><strong>Code Review</strong></td>
+<td><code>planning-control</code></td>
+<td>Multi-dimensional code analysis: correctness, performance, security, style. Plans review strategy first, then executes.</td>
+</tr>
+<tr>
+<td><strong>Release Notes</strong></td>
+<td><code>one-shot</code></td>
+<td>Reads Git history, categorizes changes, produces readable release documentation.</td>
+</tr>
+<tr>
+<td><strong>Product Discovery</strong></td>
+<td><code>one-shot</code></td>
+<td>Full workshop flow: client analysis → problem definition → opportunities → solutions → features → builder prompts.</td>
+</tr>
+</table>
+
+<br/>
+
+### Build Your Own
+
+The modes are building blocks. Combine any mode + agent set + config to automate whatever you need:
+
+| Task Idea | Mode | Deliverable |
+|-----------|------|-------------|
+| Competitive Landscape Report | `planning-control` | Structured competitor comparison |
+| Patent Prior Art Search | `arxiv` + `enhance-input` | Summarized prior art from publications |
+| Technical Due Diligence | `hitl-interactive` | Codebase/system analysis with checkpoints |
+| Weekly Market Digest | `hitl-interactive` | Recurring market trend briefings |
+| Research Paper | `deep-research` | Full LaTeX paper from idea to PDF |
+| Onboarding Guide Generator | `one-shot` | Repo documentation for new team members |
+| Customer Feedback Synthesis | `idea-generation` | Ranked hypotheses about user pain points |
+
+<br/>
+
+**Task Builder** lets you configure:
+
+```
+Task Name       →  What you want done
+Execution Mode  →  Any of the 8 modes
+Model           →  GPT-4o, Claude, Gemini, etc.
+Max Rounds      →  1–100 agent turns
+Approval Mode   →  none | always | on-failure
+```
+
+<br/>
+
+---
+
+<br/>
+
+## 🚀 What You Can Build
+
+<table>
+<tr>
+<td width="50%">
+
+### Automate Recurring Deliverables
+Weekly reports, market digests, release notes, competitive updates — set up once, run on demand. Same multi-agent pipeline, consistent output every time.
+
+### Generate Market Insights
+Multi-Step Research mode + web search + doc retrieval. Planner breaks work into phases, researchers gather data, engineer compiles the final report.
+
+### Run Product Discovery
+Automate the entire workshop — client analysis, problem definition, opportunities, solutions, features. Start with the template, iterate with Copilot.
+
+### Write Research Papers
+Idea → adversarial review → methodology → experiments → compiled LaTeX PDF. Review and refine between every stage of the Deep Research pipeline.
+
+</td>
+<td width="50%">
+
+### Literature Discovery & Synthesis
+Agents search ArXiv, download papers, OCR content, build vector stores. Describe your question, get a structured synthesis.
+
+### Build Reproducible Pipelines
+`engineer` and `executor` agents run code in sandboxed environments. Every execution tracked with costs, files, and event logs. Re-run with different inputs.
+
+### Extend With Your Own Tools
+Pluggable integrations via CrewAI and LangChain. Add domain-specific tools without touching core code. Pre-load RAG agents with your data.
+
+### Collaborate Interactively
+Copilot mode for real-time pair-work. Sessions persist context across turns. Multi-step mode carries context across phases — nothing lost.
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+---
+
+<br/>
+
+## 🏗 Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                    Frontend (UI)                     │
+│          Next.js 14  ·  React 18  ·  TailwindCSS    │
+│        Real-time via Socket.IO  ·  DAG Visualizer   │
+├─────────────────────────────────────────────────────┤
+│                   Backend (API)                      │
+│            FastAPI  ·  Uvicorn  ·  WebSockets        │
+│     REST endpoints  ·  Task engine  ·  Event stream  │
+├─────────────────────────────────────────────────────┤
+│               Agent Framework (Core)                 │
+│              AG2 multi-agent orchestration            │
+│      50+ agents  ·  DAG execution  ·  RAG pipeline   │
+├─────────────────────────────────────────────────────┤
+│                  Storage & Data                      │
+│         SQLAlchemy (SQLite / PostgreSQL)  ·  Alembic │
+│        File tracking  ·  Cost records  ·  Events     │
+└─────────────────────────────────────────────────────┘
+```
+
+<br/>
+
+### Tech Stack
 
 | Layer | Technology | Purpose |
-|-------|-----------|---------|
+|:------|:-----------|:--------|
 | Frontend | Next.js 14, React 18, TailwindCSS | Web UI with real-time updates |
-| Backend | FastAPI, Uvicorn | REST API and WebSocket server |
-| Agent Framework | AG2 (AutoGen 2) | Multi-agent orchestration |
-| Real-Time | WebSockets, Socket.IO | Live task updates and streaming |
+| Backend | FastAPI, Uvicorn | REST API + WebSocket server |
+| Agents | AG2 (AutoGen 2) | Multi-agent orchestration |
+| Real-Time | WebSockets, Socket.IO | Live task streaming |
 | Database | SQLAlchemy, SQLite / PostgreSQL | Persistence and tracking |
-| DAG Visualization | @xyflow/react | Interactive graph rendering |
-| Science | CAMB, CLASS, Cobaya, Astropy | Astronomy and cosmology tools |
-| External Tools | CrewAI, LangChain | Tool integration layer |
-| Containerization | Docker, Docker Compose | Production deployment |
+| DAG Viz | @xyflow/react | Interactive graph rendering |
+| Tools | CrewAI, LangChain | External tool integrations |
+| Deploy | Docker, Docker Compose | Containerized deployment |
+
+<br/>
 
 ---
 
-## Prerequisites
+<br/>
 
-- **Python** >= 3.12
-- **Node.js** >= 18
-- **npm** >= 9
-- **Git**
+## 🤖 Agent System
+
+50+ agents organized by function:
+
+<table>
+<tr>
+<td valign="top" width="25%">
+
+**Planning**
+| Agent | Role |
+|:------|:-----|
+| `planner` | Plans and breakdowns |
+| `task_improver` | Refines descriptions |
+| `plan_recorder` | Persists plans |
+| `plan_reviewer` | Quality review |
+| `plan_setter` | Activates plans |
+
+</td>
+<td valign="top" width="25%">
+
+**Execution**
+| Agent | Role |
+|:------|:-----|
+| `engineer` | Writes code |
+| `researcher` | Research & analysis |
+| `executor` | Sandboxed code run |
+| `executor_bash` | Shell commands |
+| `installer` | Package installs |
+
+</td>
+<td valign="top" width="25%">
+
+**Retrieval**
+| Agent | Role |
+|:------|:-----|
+| `rag_agents` | RAG pipelines |
+| `retrieve_assistant` | Doc retrieval |
+| `web_surfer` | Web browsing |
+| `perplexity` | AI search |
+
+</td>
+<td valign="top" width="25%">
+
+**Utility**
+| Agent | Role |
+|:------|:-----|
+| `idea_maker` | Generates ideas |
+| `idea_hater` | Critiques ideas |
+| `summarizer` | Summarizes output |
+| `terminator` | Task completion |
+| `copilot_control` | Copilot flow |
+
+</td>
+</tr>
+</table>
+
+<br/>
+
+---
+
+<br/>
+
+## 🏁 Getting Started
+
+### Prerequisites
+
+- **Python** >= 3.12 &nbsp;&nbsp;|&nbsp;&nbsp; **Node.js** >= 18 &nbsp;&nbsp;|&nbsp;&nbsp; **npm** >= 9 &nbsp;&nbsp;|&nbsp;&nbsp; **Git**
 - At least one LLM API key (OpenAI, Anthropic, Gemini, etc.)
 
----
-
-## Installation
-
-### 1. Clone the repository
+### Install
 
 ```bash
-git clone https://github.com/CMBAgents/cmbagent.git
-cd cmbagent
-```
+git clone https://github.com/CMBAgents/cmbagent.git && cd cmbagent
 
-### 2. Install Python dependencies
-
-```bash
-# Create and activate a virtual environment (recommended)
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
-
-# Install the core package in editable mode
+# Backend
+python -m venv .venv && source .venv/bin/activate
 pip install -e .
+pip install -e ".[data]"       # Optional: scipy, matplotlib, xgboost
+pip install -e ".[jupyter]"    # Optional: Jupyter support
+
+# Frontend
+cd cmbagent-ui && npm install && cd ..
 ```
 
-#### Optional dependency groups
+### Configure
 
 ```bash
-# Astronomy/astrophysics (CAMB, Astropy, HEALPy, emcee)
-pip install -e ".[astro]"
-
-# Data science and visualization (scipy, matplotlib, xgboost, etc.)
-pip install -e ".[data]"
-
-# Jupyter notebook support
-pip install -e ".[jupyter]"
-
-# Install everything
-pip install -e ".[astro,data,jupyter]"
-```
-
-### 3. Install frontend dependencies
-
-```bash
-cd cmbagent-ui
-npm install
-cd ..
-```
-
----
-
-## Configuration
-
-### Environment Variables
-
-Create a `.env` file in the project root:
-
-```bash
-# Required - at least one LLM provider key
+# .env (project root)
 OPENAI_API_KEY=your-openai-api-key
-
-# Optional - additional LLM providers
-ANTHROPIC_API_KEY=your-anthropic-api-key
-GEMINI_API_KEY=your-gemini-api-key
-PERPLEXITY_API_KEY=your-perplexity-api-key
-MISTRAL_API_KEY=your-mistral-api-key
-
-# Optional - Backend configuration
-CMBAGENT_CORS_ORIGINS=http://localhost:3000,http://localhost:3001  # Comma-separated list of allowed CORS origins
+ANTHROPIC_API_KEY=your-anthropic-api-key     # optional
+GEMINI_API_KEY=your-gemini-api-key           # optional
+PERPLEXITY_API_KEY=your-perplexity-api-key   # optional
+MISTRAL_API_KEY=your-mistral-api-key         # optional
 ```
 
-### Frontend Configuration
-
-Create `cmbagent-ui/.env.local`:
-
 ```bash
+# cmbagent-ui/.env.local
 NEXT_PUBLIC_API_URL=http://localhost:8000
 ```
 
-This tells the UI where to find the backend API. Adjust if your backend runs on a different host or port.
-
----
-
-## Running the Application
-
-MARS requires both the backend and frontend to be running.
-
-### Start the Backend
+### Run
 
 ```bash
-cd backend
-python run.py
+# Terminal 1 — Backend
+cd backend && python run.py
+# → http://localhost:8000  |  Docs: http://localhost:8000/docs
+
+# Terminal 2 — Frontend
+cd cmbagent-ui && npm run dev
+# → http://localhost:3000
 ```
 
-The backend starts on `http://localhost:8000`:
-- **REST API**: `http://localhost:8000`
-- **Swagger Docs**: `http://localhost:8000/docs`
-- **WebSocket**: `ws://localhost:8000/ws/{task_id}`
-
-### Start the Frontend (UI)
-
-In a separate terminal:
+### Docker
 
 ```bash
-cd cmbagent-ui
-npm run dev
-```
-
-The UI starts on `http://localhost:3000` and opens automatically in your browser.
-
-### Both Running
-
-Once both are up:
-1. Open `http://localhost:3000` in your browser
-2. Configure your API credentials via the credentials modal in the UI
-3. Create a new task or session to begin
-
----
-
-## Docker Deployment
-
-### Using Docker Compose (recommended)
-
-```bash
-# Set your API keys in .env, then:
 docker-compose up --build
+# or
+docker build -t mars . && docker run -p 3000:3000 -p 8000:8000 -e OPENAI_API_KEY=your-key mars
 ```
 
-This starts the full application:
-- **UI**: `http://localhost:3000`
-- **API**: `http://localhost:8000`
-
-### Using Docker directly
-
-```bash
-# Standard build
-docker build -t mars .
-docker run -p 3000:3000 -p 8000:8000 \
-  -e OPENAI_API_KEY=your-key \
-  mars
-
-# Hugging Face Spaces build
-docker build -f Dockerfile.nextjs -t mars-hf .
-docker run -p 7860:7860 -p 8000:8000 \
-  -e OPENAI_API_KEY=your-key \
-  mars-hf
-```
+<br/>
 
 ---
 
-## Project Structure
+<br/>
 
-```
-mars/
-├── backend/                    # FastAPI backend application
-│   ├── run.py                 # Backend entry point
-│   ├── main.py                # FastAPI app assembly
-│   ├── core/                  # App configuration and initialization
-│   ├── routers/               # API endpoint handlers
-│   │   ├── runs.py            #   Task run management
-│   │   ├── sessions.py        #   Session management
-│   │   ├── phases.py          #   Workflow phase execution
-│   │   ├── tasks.py           #   Task creation and status
-│   │   ├── copilot.py         #   Copilot endpoints
-│   │   ├── files.py           #   File management
-│   │   ├── branching.py       #   Branching workflows
-│   │   ├── arxiv.py           #   ArXiv paper retrieval
-│   │   ├── nodes.py           #   DAG node management
-│   │   ├── enhance.py         #   Task enhancement
-│   │   ├── credentials.py     #   API credential management
-│   │   └── health.py          #   Health check
-│   ├── models/                # Pydantic request/response schemas
-│   ├── services/              # Business logic layer
-│   ├── execution/             # Task execution engine
-│   ├── websocket/             # WebSocket handlers and events
-│   └── callbacks/             # Event callback handlers
-│
-├── cmbagent/                  # Core Python package (agent library)
-│   ├── agents/                # 50+ specialized agent definitions
-│   ├── orchestrator/          # Agent orchestration and group chat
-│   ├── handoffs/              # Agent-to-agent transition config
-│   ├── external_tools/        # External tool integrations
-│   ├── database/              # SQLAlchemy models and migrations
-│   │   └── migrations/        #   Alembic migration scripts
-│   ├── dag/                   # DAG builder, executor, tracker
-│   ├── processing/            # Document processing and OCR
-│   └── cli.py                 # CLI entry point
-│
-├── cmbagent-ui/               # Next.js frontend application
-│   ├── app/                   # Next.js app directory (pages)
-│   ├── components/            # React components
-│   │   ├── dag/               #   DAG visualization
-│   │   ├── SessionManager/    #   Session management UI
-│   │   ├── branching/         #   Branching workflow UI
-│   │   ├── metrics/           #   Performance metrics display
-│   │   ├── ApprovalChatPanel  #   Human-in-the-loop approval
-│   │   ├── CopilotView        #   Copilot interface
-│   │   ├── FileBrowser        #   File browser
-│   │   ├── ConsoleOutput      #   Console output streaming
-│   │   ├── ModelSelector      #   Model selection
-│   │   └── ...                #   And more
-│   ├── contexts/              # React context providers
-│   ├── hooks/                 # Custom React hooks
-│   ├── lib/                   # Utility functions
-│   └── types/                 # TypeScript type definitions
-│
-├── tests/                     # Test suite
-├── examples/                  # Usage examples
-├── data/                      # Data files
-├── evals/                     # Evaluation datasets
-│
-├── pyproject.toml             # Python project configuration
-├── docker-compose.yml         # Docker Compose setup
-├── Dockerfile                 # Standard Docker build
-├── Dockerfile.nextjs          # Hugging Face Spaces Docker build
-├── alembic.ini                # Database migration config
-└── LICENSE                    # Apache 2.0
-```
+## 📡 API Reference
 
----
-
-## Backend API
-
-The backend is a FastAPI application providing REST endpoints and WebSocket connections.
-
-### Key Endpoints
+Full interactive docs at `http://localhost:8000/docs`.
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
-| `GET` | `/health` | Health check |
+|:-------|:---------|:------------|
 | `POST` | `/tasks` | Create a new task |
 | `GET` | `/tasks/{id}` | Get task status |
 | `POST` | `/runs` | Start a task run |
 | `GET` | `/runs/{id}` | Get run details |
 | `POST` | `/sessions` | Create a session |
-| `GET` | `/sessions` | List sessions |
 | `POST` | `/phases/{id}/execute` | Execute a workflow phase |
-| `GET` | `/files/{run_id}` | List files for a run |
 | `POST` | `/enhance` | Enhance a task description |
-| `POST` | `/credentials` | Set API credentials |
-| `WS` | `/ws/{task_id}` | WebSocket for real-time updates |
+| `POST` | `/api/deepresearch/create` | Create a deep research task |
+| `POST` | `/api/deepresearch/{id}/stages/{num}/execute` | Execute a research stage |
+| `POST` | `/api/arxiv/filter` | Extract and download papers |
+| `WS` | `/ws/{task_id}` | Real-time updates |
 
-Full interactive API documentation is available at `http://localhost:8000/docs` when the backend is running.
+<details>
+<summary><strong>WebSocket Events</strong></summary>
 
-### WebSocket Events
+| Event | Description |
+|:------|:------------|
+| `status` | Task status changes |
+| `output` | Agent output streaming |
+| `dag_update` | DAG execution progress |
+| `approval_request` | HITL approval requests |
+| `cost_update` | Token usage and cost tracking |
+| `file_created` | New file notifications |
+| `error` | Error events |
 
-Connect to `ws://localhost:8000/ws/{task_id}` to receive real-time events:
+</details>
 
-- **status** - Task status changes
-- **output** - Agent output streaming
-- **dag_update** - DAG execution progress
-- **approval_request** - Human-in-the-loop approval requests
-- **cost_update** - Token usage and cost tracking
-- **file_created** - New file notifications
-- **error** - Error events
-
----
-
-## Frontend UI
-
-The UI is a Next.js 14 application with the following features:
-
-- **Task Management** - Create, monitor, and manage research tasks
-- **Real-Time Streaming** - Live agent output via WebSocket
-- **DAG Visualization** - Interactive graph showing task dependencies and execution flow
-- **Session Management** - Create and manage research sessions with context persistence
-- **Human-in-the-Loop** - Approval panel for reviewing and approving agent plans
-- **Copilot Mode** - Interactive copilot interface for guided research
-- **File Browser** - Browse and download files generated by agents
-- **Branching Workflows** - Create and manage branching execution paths
-- **Metrics Dashboard** - Token usage, cost tracking, and performance metrics
-- **Model Selection** - Choose between different LLM providers
-- **Credentials Management** - Configure API keys through the UI
+<br/>
 
 ---
 
-## Agent System
+<br/>
 
-MARS includes 50+ specialized agents organized by function:
+## 🔌 External Tools
 
-### Planning Agents
-| Agent | Purpose |
-|-------|---------|
-| `planner` | Creates research plans and task breakdowns |
-| `task_improver` | Refines and enhances task descriptions |
-| `plan_recorder` | Records and persists plans |
-| `plan_reviewer` | Reviews plans for quality and completeness |
-| `plan_setter` | Sets active plan for execution |
+30+ integrations via CrewAI and LangChain adapters:
 
-### Execution Agents
-| Agent | Purpose |
-|-------|---------|
-| `engineer` | Writes and modifies code |
-| `researcher` | Conducts research and analysis |
-| `executor` | Executes code in sandboxed environment |
-| `executor_bash` | Executes shell commands |
-| `installer` | Installs required packages |
+**ArXiv** &nbsp;·&nbsp; **Wikipedia** &nbsp;·&nbsp; **DuckDuckGo** &nbsp;·&nbsp; **Perplexity** &nbsp;·&nbsp; **Python REPL** &nbsp;·&nbsp; **Shell** &nbsp;·&nbsp; **File Ops** &nbsp;·&nbsp; **Web Scraping** &nbsp;·&nbsp; **GitHub Search**
 
-### Domain-Specific Agents (Cosmology)
-| Agent | Purpose |
-|-------|---------|
-| `camb_context` | CAMB power spectrum context |
-| `classy_context` | CLASS cosmology context |
-| `cobaya_response_formatter` | Cobaya inference formatting |
-| `rag_agents` | Retrieval-augmented generation for domain data |
-| `retrieve_assistant` | Document retrieval |
-
-### Utility Agents
-| Agent | Purpose |
-|-------|---------|
-| `summarizer` | Summarizes results and outputs |
-| `terminator` | Handles task completion |
-| `idea_maker` | Generates research ideas |
-| `idea_hater` | Critically evaluates ideas |
-| `web_surfer` | Web browsing and search |
-| `perplexity` | Perplexity AI search |
-| `copilot_control` | Copilot workflow control |
+<br/>
 
 ---
 
-## Workflow Types
+<br/>
 
-MARS supports multiple workflow types for different research scenarios:
-
-| Workflow | Description |
-|----------|-------------|
-| `planning_and_control` | Standard two-phase: plan first, then execute |
-| `deep_research` | Planning with context carryover across phases |
-| `one_shot` | Single-pass task execution without planning |
-| `human_in_the_loop` | Interactive workflow with approval checkpoints |
-| `copilot` | Guided research with copilot assistance |
-| `copilot_async` | Async copilot for longer tasks |
-| `quick_task` | Fast execution for simple tasks |
-| `planned_task` | Execute from a pre-defined plan |
-| `interactive_session` | Real-time interactive mode |
-| `control` | Execute from an existing plan |
-
----
-
-## Database
-
-MARS uses SQLAlchemy with Alembic for database management.
-
-### Default: SQLite
-
-Out of the box, MARS uses SQLite (`cmbagent.db` in the project root). No additional setup required.
-
-### Production: PostgreSQL
-
-For production deployments, configure PostgreSQL:
-
-1. Install PostgreSQL and create a database
-2. Update the database URL in the backend configuration
-3. Run migrations:
+## 🧪 Testing
 
 ```bash
-alembic upgrade head
+pytest                       # All tests
+pytest -m "not slow"         # Skip slow tests
+pytest -m integration        # Integration only
+pytest -v                    # Verbose
 ```
 
-### Database Tables
-
-| Table | Purpose |
-|-------|---------|
-| `runs` | Workflow execution records |
-| `sessions` | User sessions and context |
-| `phases` | Phase execution records |
-| `nodes` | DAG nodes and dependencies |
-| `approvals` | Human-in-the-loop approval records |
-| `files` | Tracked input/output files |
-| `cost_records` | Token usage and cost tracking |
-| `events` | Execution events and logs |
-
-### Running Migrations
-
-```bash
-# Apply all pending migrations
-alembic upgrade head
-
-# Create a new migration after model changes
-alembic revision --autogenerate -m "description of change"
-
-# Rollback one migration
-alembic downgrade -1
-```
+<br/>
 
 ---
 
-## External Tools
+<br/>
 
-MARS integrates 30+ external tools through CrewAI and LangChain adapters:
+<p align="center">
 
-### Research Tools
-- **ArXiv** - Search and download academic papers
-- **Wikipedia** - Query Wikipedia articles
-- **DuckDuckGo** - Web search
-- **Perplexity** - AI-powered search
+**Logs** &nbsp;→&nbsp; `~/.cmbagent/logs/backend.log`
 
-### Code and File Tools
-- **Python REPL** - Execute Python code
-- **Shell** - Execute shell commands
-- **File operations** - Read, write, and manage files
-- **Code analysis** - Code search and analysis
+**License** &nbsp;→&nbsp; [Apache 2.0](LICENSE)
 
-### Web Tools
-- **Web scraping** - Extract content from web pages
-- **HTTP requests** - Make API calls
-- **GitHub search** - Search GitHub repositories
+</p>
+
+<br/>
 
 ---
 
-## Testing
+<p align="center">
+  <strong>Maintainers</strong><br/>
+  <a href="https://github.com/UJ2202">Ujjwal Tiwari</a> (<a href="mailto:22yash.tiwari@gmail.com">22yash.tiwari@gmail.com</a>) &nbsp;&middot;&nbsp;
+  <a href="https://github.com/archetana">Chetana Shanbhag</a> (<a href="mailto:Chetana_Shanbhag@infosys.com">Chetana_Shanbhag@infosys.com</a>) &nbsp;&middot;&nbsp;
+  <a href="https://github.com/borisbolliet">CMBAgents</a> (<a href="mailto:boris.bolliet@cmbagent.community">boris.bolliet@cmbagent.community</a>)
+</p>
 
-```bash
-# Run all tests
-pytest
-
-# Run tests excluding slow tests
-pytest -m "not slow"
-
-# Run only integration tests
-pytest -m integration
-
-# Run with verbose output
-pytest -v
-
-# Run a specific test file
-pytest tests/test_specific.py
-```
-
----
-
-## Logs
-
-Backend logs are written to:
-
-```
-~/.cmbagent/logs/backend.log
-```
-
----
-
-## License
-
-[Apache License 2.0](LICENSE)
-
----
-
-## Links
-
-- **Repository**: [github.com/CMBAgents/cmbagent](https://github.com/CMBAgents/cmbagent)
-- **Maintainer**: CMBAgents (boris.bolliet@cmbagent.community)
+<p align="center">
+  <strong>Contributors</strong><br/>
+  <a href="https://github.com/SACHIN-MOURYA">@SACHIN-MOURYA</a> &nbsp;&middot;&nbsp;
+  <a href="https://github.com/khapraravi">@khapraravi</a>
+</p>
