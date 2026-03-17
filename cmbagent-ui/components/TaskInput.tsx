@@ -168,45 +168,51 @@ Don't suggest to perform any calculations or analyses here. The only goal of thi
   const getExampleTasks = (mode: string) => {
     if (mode === 'idea-generation') {
       return [
-        'Bank customer data during covid-19',
-        'Galaxy cluster observations from Hubble telescope',
-        'Climate change temperature records 1900-2020'
+        'Gene expression profiles from Alzheimer\'s patients vs healthy controls',
+        'Seismic activity near tectonic plate boundaries from 2000 to 2024',
+        'Urban heat island temperature measurements across 50 global cities'
       ]
     } else if (mode === 'hitl-interactive') {
       return [
-        'Analyze CMB power spectrum with custom parameters and plot results',
-        'Build a market impact model incorporating order flow and volatility',
-        'Process astronomical data from JWST and identify candidate exoplanets'
+        'Solve PDEs modeling 2D fluid flow and visualize the velocity field',
+        'Build an ECG signal classifier to detect atrial fibrillation',
+        'Run a Bayesian parameter estimation for a damped harmonic oscillator'
       ]
     } else if (mode === 'copilot') {
       return [
-        'Help me analyze this dataset and create visualizations',
-        'Build a simple web scraper for news articles',
-        'Create a Python script that processes CSV files and generates a summary report'
+        'Explain the key differences between gradient descent variants',
+        'Write a regex to validate IPv6 addresses with edge cases',
+        'Debug this recursive tree traversal and add memoization'
       ]
     } else if (mode === 'ocr') {
       return [
-        '/Users/username/Documents/research_papers/',
-        '/Users/username/Desktop/scientific_paper.pdf',
-        '~/Downloads/reports/'
+        '/path/to/lab_notebook_scan.pdf',
+        '/path/to/handwritten_equations.png',
+        '/path/to/scanned_field_notes.jpg'
       ]
     } else if (mode === 'arxiv') {
       return [
-        'Fuzzy dark matter models at https://arxiv.org/pdf/1610.08297',
-        'Recent JWST observations show Little Red Dots at https://arxiv.org/abs/2509.02664',
-        'Black hole mass measurements https://arxiv.org/html/2508.21748'
+        'What are the key findings in https://arxiv.org/abs/2412.07626 on diffusion models?',
+        'Summarize the methodology of https://arxiv.org/abs/2309.02041 on gravitational wave memory',
+        'Explain the approach in https://arxiv.org/abs/2006.11239 and its limitations'
       ]
     } else if (mode === 'enhance-input') {
       return [
-        'We want to develop a comprehensive market impact model building on recent advances in square-root price impact. The work in https://arxiv.org/abs/2509.05065 shows how order imbalance and volatility interact in artificial markets.',
-        'Recent cosmic birefringence measurements from ACT are fascinating. The analysis in https://arxiv.org/pdf/2509.13654 provides new constraints on axion-like particles and cosmic magnetic fields.',
-        'what is the link between that paper on surface diffusion for neurodevelopment https://arxiv.org/pdf/2508.03706 and this one on conditional control in text-to-image diffusion https://arxiv.org/pdf/2302.05543'
+        'Explore topological phases in condensed matter — see https://arxiv.org/abs/1707.05766 — and relate to recent experimental results on Majorana fermions.',
+        'My hypothesis on epigenetic aging clocks combined with the landmark paper at https://arxiv.org/abs/1911.12915 on DNA methylation biomarkers.',
+        'What does this work on neural scaling laws https://arxiv.org/abs/2001.08361 imply for training efficiency at smaller compute budgets?'
+      ]
+    } else if (mode === 'planning-control') {
+      return [
+        'Investigate how gut microbiome composition influences mental health outcomes',
+        'Explore the physics and engineering bottlenecks of nuclear fusion reactors',
+        'Research coral reef bleaching causes and evaluate leading restoration strategies'
       ]
     }
     return [
-      'Plot a 3D Möbius strip using matplotlib.',
-      'Simulate stock prices during Trump tariffs',
-      'Generate 100 random numbers and plot their histogram'
+      'Simulate a double pendulum for 15 seconds and plot the chaotic trajectory',
+      'Compute prime number distribution up to 100,000 and visualize gaps',
+      'Analyze word frequency in Hamlet and plot the top 20 words as a bar chart'
     ]
   }
 

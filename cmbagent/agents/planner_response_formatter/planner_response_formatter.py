@@ -57,6 +57,9 @@ def _parse_plan_string(plan_str: str) -> List[Dict[str, Any]]:
     """
     Convert the markdown-style plan string produced by PlannerResponse.format()
     back into a list[dict] matching the Subtasks model.
+
+    Handles both the formatted output style (lowercase, no bold) and the raw
+    LLM output style (uppercase field names, bold step headers).
     """
     lines = [ln.rstrip() for ln in plan_str.splitlines()]
     subtasks: List[Dict[str, Any]] = []
@@ -65,9 +68,10 @@ def _parse_plan_string(plan_str: str) -> List[Dict[str, Any]]:
 
     for ln in lines:
         ln_stripped = ln.lstrip()
+        ln_lower = ln_stripped.lower()
 
-        # --- step header ----------------------------------------------------
-        if ln_stripped.startswith("- Step"):
+        # --- step header: "- Step N:" or "- **Step N:**" -------------------
+        if ln_lower.startswith("- step") or ln_lower.startswith("- **step"):
             if current:
                 subtasks.append(current)
             current = {"bullet_points": []}
@@ -75,27 +79,43 @@ def _parse_plan_string(plan_str: str) -> List[Dict[str, Any]]:
             continue
 
         # --- sub-task -------------------------------------------------------
-        if ln_stripped.startswith("* sub-task:"):
+        if ln_lower.startswith("* sub-task:"):
             if current is None:    # defensive
                 current = {"bullet_points": []}
-            current["sub_task"] = ln_stripped.removeprefix("* sub-task:").strip()
+            current["sub_task"] = ln_stripped[len("* sub-task:"):].strip()
+            in_instr = False
             continue
 
-        # --- agent in charge -----------------------------------------------
-        if ln_stripped.startswith("* agent in charge:"):
+        # --- agent in charge (formatted style) -----------------------------
+        if ln_lower.startswith("* agent in charge:"):
+            if current is None:
+                current = {"bullet_points": []}
             current["sub_task_agent"] = (
-                ln_stripped.removeprefix("* agent in charge:").strip()
+                ln_stripped[len("* agent in charge:"):].strip().lower()
             )
+            in_instr = False
             continue
 
-        # --- instructions block start --------------------------------------
-        if ln_stripped.startswith("* instructions:"):
+        # --- agent (raw LLM style) -----------------------------------------
+        if ln_lower.startswith("* agent:"):
+            if current is None:
+                current = {"bullet_points": []}
+            current["sub_task_agent"] = (
+                ln_stripped[len("* agent:"):].strip().lower()
+            )
+            in_instr = False
+            continue
+
+        # --- instructions / bullet points block start ----------------------
+        if (ln_lower.startswith("* instructions:")
+                or ln_lower.startswith("* bullet points:")
+                or ln_lower.startswith("* bullet point:")):
             in_instr = True
             continue
 
         # --- bullet points --------------------------------------------------
         if in_instr and ln_stripped.startswith("-"):
-            current["bullet_points"].append(ln_stripped.removeprefix("-").strip())
+            current["bullet_points"].append(ln_stripped[1:].strip())
 
     # add last task if any
     if current:

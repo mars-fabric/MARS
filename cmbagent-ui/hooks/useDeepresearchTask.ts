@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { getApiUrl, getWsUrl } from '@/lib/config'
+import { getApiUrl, getWsUrl, config } from '@/lib/config'
 import type {
   DeepresearchTaskState,
   DeepresearchStageContent,
@@ -128,7 +128,7 @@ export function useDeepresearchTask(): UseDeepresearchTaskReturn {
   const createTask = useCallback(async (
     task: string,
     dataDescription?: string,
-    config?: DeepresearchStageConfig,
+    stageConfig?: DeepresearchStageConfig,
   ) => {
     setIsLoading(true)
     setError(null)
@@ -140,18 +140,18 @@ export function useDeepresearchTask(): UseDeepresearchTaskReturn {
           method: 'PATCH',
           body: JSON.stringify({ task, data_description: dataDescription }),
         })
-        if (config) setTaskConfig(config)
+        if (stageConfig) setTaskConfig(stageConfig)
         return existingId
       }
 
       // Otherwise create fresh
       const resp: DeepresearchCreateResponse = await apiFetch('/api/deepresearch/create', {
         method: 'POST',
-        body: JSON.stringify({ task, data_description: dataDescription, config }),
+        body: JSON.stringify({ task, data_description: dataDescription, config: stageConfig, work_dir: config.workDir }),
       })
       setTaskId(resp.task_id)
       taskIdRef.current = resp.task_id
-      if (config) setTaskConfig(config)
+      if (stageConfig) setTaskConfig(stageConfig)
       await loadTaskState(resp.task_id)
       return resp.task_id
     } catch (e: unknown) {
@@ -352,7 +352,7 @@ export function useDeepresearchTask(): UseDeepresearchTaskReturn {
     if (autoCreateLockRef.current) return autoCreateLockRef.current
     const p = apiFetch('/api/deepresearch/create', {
       method: 'POST',
-      body: JSON.stringify({ task: '' }),
+      body: JSON.stringify({ task: '', work_dir: config.workDir }),
     }).then((resp: DeepresearchCreateResponse) => {
       taskIdRef.current = resp.task_id
       setTaskId(resp.task_id)

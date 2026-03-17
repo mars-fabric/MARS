@@ -41,7 +41,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.7.4",
     "aiohttp>=3.9.0",
-
+    "langgraph",
+    "PyMuPDF",
     # Database dependencies
     "sqlalchemy>=2.0",
     "alembic>=1.13",
@@ -50,6 +51,9 @@ dependencies = [
     # AG2 External Tools - LangChain and CrewAI free tools (enabled by default)
     "ag2[interop-langchain,interop-crewai]>=0.10.3",
     "langchain-community>=0.0.20",
+    "langchain-openai>=0.1.0",
+    "langchain-anthropic>=0.1.0",
+    "langchain-google-genai>=1.0.0",
     "crewai[tools]>=0.1.0",
     "duckduckgo-search>=4.0.0",
     "feedparser>=6.0.11",

@@ -102,6 +102,25 @@ class DeepresearchPaperPhase(Phase):
             elif isinstance(keys, dict):
                 keys = KeyManager(**keys)
 
+            # Auto-select LLM model based on available credentials when the
+            # configured model can't be satisfied.
+            llm_model = self.config.llm_model
+            if "gemini" in llm_model and not keys.GEMINI:
+                if keys.OPENAI:
+                    llm_model = "gpt-4o"
+                    logger.info("GOOGLE_API_KEY not set — falling back to gpt-4o")
+                elif keys.AZURE_OPENAI_API_KEY and keys.AZURE_OPENAI_ENDPOINT and keys.AZURE_OPENAI_DEPLOYMENT:
+                    llm_model = "gpt-4o"
+                    logger.info("GOOGLE_API_KEY not set — falling back to Azure gpt-4o")
+                elif keys.ANTHROPIC:
+                    llm_model = "claude-3-5-sonnet-20241022"
+                    logger.info("GOOGLE_API_KEY not set — falling back to claude-3-5-sonnet")
+                else:
+                    raise ValueError(
+                        "No LLM credentials found. Set GOOGLE_API_KEY, OPENAI_API_KEY, "
+                        "AZURE_OPENAI_API_KEY, or ANTHROPIC_API_KEY."
+                    )
+
             # Auto-disable citations when no Perplexity key is available.
             # Mirrors original Deepresearch behaviour: citations only run when the
             # PERPLEXITY_API_KEY is set.
@@ -127,7 +146,7 @@ class DeepresearchPaperPhase(Phase):
             input_state = {
                 "files": {"Folder": project_dir},
                 "llm": {
-                    "model": self.config.llm_model,
+                    "model": llm_model,
                     "temperature": self.config.llm_temperature,
                     "max_output_tokens": self.config.llm_max_output_tokens,
                 },

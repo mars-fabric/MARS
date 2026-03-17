@@ -92,10 +92,18 @@ def _get_cost_repo(db, session_id: str = "deepresearch"):
     return CostRepository(db, session_id=session_id)
 
 
-def _get_work_dir(task_id: str) -> str:
-    """Get the work directory for a deepresearch task."""
+def _get_work_dir(task_id: str, session_id: str = None, base_work_dir: str = None) -> str:
+    """Get the work directory for a deepresearch task.
+
+    Uses session-based structure: {base}/sessions/{session_id}/tasks/{task_id}
+    matching the structure used by all other task modes.
+    Falls back to legacy deepresearch_tasks/{task_id} when session_id is absent.
+    """
     from core.config import settings
-    base = os.path.expanduser(settings.default_work_dir)
+    base = os.path.expanduser(base_work_dir or settings.default_work_dir)
+    if session_id:
+        return os.path.join(base, "sessions", session_id, "tasks", task_id)
+    # Legacy fallback for old tasks without a session
     return os.path.join(base, "deepresearch_tasks", task_id)
 
 
@@ -267,18 +275,31 @@ def _clear_console_buffer(buf_key: str):
 async def create_deepresearch_task(request: DeepresearchCreateRequest):
     """Create a new Deepresearch research task with 4 pending stages."""
     task_id = str(uuid.uuid4())
-    work_dir = _get_work_dir(task_id)
-    os.makedirs(work_dir, exist_ok=True)
-    os.makedirs(os.path.join(work_dir, "input_files"), exist_ok=True)
 
     # Create a proper session via SessionManager (matches AI-Weekly, etc.)
     from services.session_manager import get_session_manager
+    from core.config import settings
     sm = get_session_manager()
+
+    # Resolve base work directory from request (frontend config) or backend setting
+    base_work_dir = request.work_dir or settings.default_work_dir
+    base_work_dir = os.path.expanduser(base_work_dir)
+
+    # Create session first so we have the session_id for path construction
     session_id = sm.create_session(
         mode="deepresearch-research",
-        config={"task_id": task_id, "work_dir": work_dir},
+        config={"task_id": task_id, "base_work_dir": base_work_dir},
         name=f"Deepresearch: {request.task[:60]}",
     )
+
+    # Session-based work dir: {base}/sessions/{session_id}/tasks/{task_id}
+    # This matches the structure used by all other task modes
+    work_dir = _get_work_dir(task_id, session_id=session_id, base_work_dir=base_work_dir)
+    os.makedirs(work_dir, exist_ok=True)
+    os.makedirs(os.path.join(work_dir, "input_files"), exist_ok=True)
+    # Create standard subdirectories agents expect
+    for subdir in ("data", "codebase", "chats", "planning", "control"):
+        os.makedirs(os.path.join(work_dir, subdir), exist_ok=True)
 
     db = _get_db()
     try:
@@ -296,6 +317,7 @@ async def create_deepresearch_task(request: DeepresearchCreateRequest):
             started_at=datetime.now(timezone.utc),
             meta={
                 "work_dir": work_dir,
+                "base_work_dir": base_work_dir,
                 "data_description": request.data_description or "",
                 "config": request.config or {},
                 "session_id": session_id,

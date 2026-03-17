@@ -59,6 +59,9 @@ async def send_ws_event(
             return True
         except Exception as e:
             last_error = e
+            # Treat "close already sent" as a permanent disconnect — no retry.
+            if isinstance(e, RuntimeError) and "close message has been sent" in str(e):
+                break
             # If socket is no longer connected, don't retry
             try:
                 if websocket.client_state != WebSocketState.CONNECTED:

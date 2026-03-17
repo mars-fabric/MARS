@@ -14,16 +14,18 @@ interface ModeGalleryProps {
 export default function ModeGallery({ onLaunchMode, onConfigureMode }: ModeGalleryProps) {
   const [searchQuery, setSearchQuery] = useState('')
 
+  const visibleModes = useMemo(() => MARS_MODES.filter((m) => m.id !== 'copilot'), [])
+
   const filteredModes = useMemo(() => {
-    if (!searchQuery.trim()) return MARS_MODES
+    if (!searchQuery.trim()) return visibleModes
     const q = searchQuery.toLowerCase()
-    return MARS_MODES.filter(
+    return visibleModes.filter(
       (m) =>
         m.displayName.toLowerCase().includes(q) ||
         m.description.toLowerCase().includes(q) ||
         m.tags.some((t) => t.toLowerCase().includes(q))
     )
-  }, [searchQuery])
+  }, [searchQuery, visibleModes])
 
   return (
     <div className="p-6 max-w-7xl mx-auto">

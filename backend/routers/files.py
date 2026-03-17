@@ -408,8 +408,27 @@ async def upload_file(
         raise HTTPException(status_code=400, detail="Invalid subfolder path")
 
     # Build target directory
-    base_work_dir = os.path.expanduser(settings.default_work_dir)
-    target_dir = os.path.join(base_work_dir, "deepresearch_tasks", task_id, safe_subfolder)
+    # Look up the task's actual work_dir from the database first (for session-based paths)
+    target_dir = None
+    try:
+        from cmbagent.database.base import get_db_session
+        from cmbagent.database.models import WorkflowRun
+        db = get_db_session()
+        try:
+            run = db.query(WorkflowRun).filter(WorkflowRun.id == task_id).first()
+            if run and run.meta and run.meta.get("work_dir"):
+                work_dir_from_db = run.meta["work_dir"]
+                target_dir = os.path.join(work_dir_from_db, safe_subfolder)
+        finally:
+            db.close()
+    except Exception:
+        pass  # Fall through to legacy path
+
+    if not target_dir:
+        # Legacy fallback for tasks created before session-based paths
+        base_work_dir = os.path.expanduser(settings.default_work_dir)
+        target_dir = os.path.join(base_work_dir, "deepresearch_tasks", task_id, safe_subfolder)
+
     os.makedirs(target_dir, exist_ok=True)
 
     target_path = os.path.join(target_dir, safe_name)

@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from langchain_core.runnables import RunnableConfig
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI, AzureChatOpenAI
 from langchain_anthropic import ChatAnthropic
 
 from .parameters import GraphState
@@ -25,9 +25,31 @@ def preprocess_node(state: GraphState, config: RunnableConfig):
                                                 google_api_key=state["keys"].GEMINI)
 
     elif any(key in state['llm']['model'] for key in ['gpt', 'o3']):
-        state['llm']['llm'] = ChatOpenAI(model=state['llm']['model'],
-                                         temperature=state['llm']['temperature'],
-                                         openai_api_key=state["keys"].OPENAI)
+        _openai_key = state["keys"].OPENAI
+        _azure_key  = state["keys"].AZURE_OPENAI_API_KEY
+        _azure_ep   = state["keys"].AZURE_OPENAI_ENDPOINT
+        _azure_dep  = state["keys"].AZURE_OPENAI_DEPLOYMENT
+        _azure_ver  = state["keys"].AZURE_OPENAI_API_VERSION
+        if _openai_key:
+            state['llm']['llm'] = ChatOpenAI(
+                model=state['llm']['model'],
+                temperature=state['llm']['temperature'],
+                openai_api_key=_openai_key,
+            )
+        elif _azure_key and _azure_ep and _azure_dep:
+            # Fall back to Azure OpenAI when OPENAI_API_KEY is not set
+            state['llm']['llm'] = AzureChatOpenAI(
+                azure_deployment=_azure_dep,
+                azure_endpoint=_azure_ep,
+                api_key=_azure_key,
+                api_version=_azure_ver or "2024-12-01-preview",
+                temperature=state['llm']['temperature'],
+            )
+        else:
+            raise ValueError(
+                "No OpenAI credentials found. Set OPENAI_API_KEY or "
+                "AZURE_OPENAI_API_KEY + AZURE_OPENAI_ENDPOINT + AZURE_OPENAI_DEPLOYMENT."
+            )
                     
     elif 'claude' in state['llm']['model']  or 'anthropic' in state['llm']['model'] :
         state['llm']['llm'] = ChatAnthropic(model=state['llm']['model'],

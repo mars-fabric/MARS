@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from html import unescape
@@ -22,7 +23,7 @@ import structlog
 logger = structlog.get_logger(__name__)
 
 
-_DEFAULT_TIMEOUT_SECONDS = 20
+_DEFAULT_TIMEOUT_SECONDS = 8
 
 _QUERY_STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how",
@@ -314,60 +315,87 @@ def _extract_search_items(html: str, engine: str) -> List[Dict[str, str]]:
     return items
 
 
-def multi_engine_web_search(query: str, max_results: int = 10) -> Dict:
-    """Search the web with DuckDuckGo first, then Google/Bing/Yahoo/Brave on failure.
+def _ddgs_text_search(query: str, max_results: int = 10) -> List[Dict[str, str]]:
+    """Search using the ddgs SDK package (formerly duckduckgo_search).
 
-    This gives planner workflows a resilient no-key fallback path when DDG is flaky.
+    Returns a normalised list of {title, url, engine} dicts or an empty list on
+    any failure (rate-limit, timeout, etc.).
+    """
+    try:
+        from ddgs import DDGS
+
+        raw = DDGS().text(query, max_results=max(1, max_results), backend="html")
+        if not raw:
+            return []
+        return [
+            {
+                "title": r.get("title") or r.get("href", ""),
+                "url": r.get("href") or r.get("link", ""),
+                "engine": "ddgs",
+            }
+            for r in raw
+            if (r.get("href") or r.get("link"))
+        ]
+    except Exception as err:
+        logger.warning("ddgs_sdk_search_failed", query=query, error=str(err))
+        return []
+
+
+def multi_engine_web_search(query: str, max_results: int = 10) -> Dict:
+    """Search the web using the duckduckgo_search SDK, falling back to
+    HTML scraping of Bing/Yahoo/Brave when the SDK returns nothing.
+
+    This gives planner workflows a resilient no-key fallback path.
     """
     q = (query or "").strip()
     if not q:
         return {"provider": "multi_engine_web_search", "query": query, "count": 0, "items": [], "errors": ["empty query"]}
 
+    errors: List[str] = []
+    used_engines: List[str] = []
+
+    # --- Primary: duckduckgo_search SDK (handles rate-limits / retries internally) ---
+    sdk_items = _ddgs_text_search(q, max_results=max_results)
+    if sdk_items:
+        return {
+            "provider": "multi_engine_web_search",
+            "query": q,
+            "engines_used": ["duckduckgo_sdk"],
+            "count": len(sdk_items),
+            "items": sdk_items,
+            "errors": [],
+        }
+    errors.append("duckduckgo_sdk returned no results")
+
+    # --- Fallback: HTML scraping of Bing/Yahoo/Brave (skip Google to avoid 429) ---
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
     }
-
-    engines = [
-        ("duckduckgo", f"https://duckduckgo.com/html/?{urlencode({'q': q})}"),
-        ("google", f"https://www.google.com/search?{urlencode({'q': q})}"),
+    fallback_engines = [
         ("bing", f"https://www.bing.com/search?{urlencode({'q': q})}"),
         ("yahoo", f"https://search.yahoo.com/search?{urlencode({'p': q})}"),
         ("brave", f"https://search.brave.com/search?{urlencode({'q': q})}"),
     ]
 
     aggregated: List[Dict[str, str]] = []
-    seen = set()
-    errors: List[str] = []
-    used_engines: List[str] = []
+    seen: set = set()
 
-    # DuckDuckGo first; only fall back if no results were found.
-    ddg_html = _safe_get_text(engines[0][1], headers=headers)
-    ddg_items = _extract_search_items(ddg_html, "duckduckgo")
-    if ddg_items:
-        used_engines.append("duckduckgo")
-        aggregated = ddg_items[: max(1, max_results)]
-    else:
-        if not ddg_html:
-            errors.append("duckduckgo request failed")
-        else:
-            errors.append("duckduckgo returned zero parsable results")
-
-        for engine_name, url in engines[1:]:
-            html = _safe_get_text(url, headers=headers)
-            if not html:
-                errors.append(f"{engine_name} request failed")
+    for engine_name, url in fallback_engines:
+        html = _safe_get_text(url, headers=headers)
+        if not html:
+            errors.append(f"{engine_name} request failed")
+            continue
+        used_engines.append(engine_name)
+        for item in _extract_search_items(html, engine_name):
+            key = ((item.get("url") or "").lower(), (item.get("title") or "").lower())
+            if key in seen:
                 continue
-            used_engines.append(engine_name)
-            for item in _extract_search_items(html, engine_name):
-                key = ((item.get("url") or "").lower(), (item.get("title") or "").lower())
-                if key in seen:
-                    continue
-                seen.add(key)
-                aggregated.append(item)
-                if len(aggregated) >= max(1, max_results):
-                    break
+            seen.add(key)
+            aggregated.append(item)
             if len(aggregated) >= max(1, max_results):
                 break
+        if len(aggregated) >= max(1, max_results):
+            break
 
     return {
         "provider": "multi_engine_web_search",
@@ -388,22 +416,41 @@ def curated_ai_sources_catalog() -> Dict:
     }
 
 
+# Delay (seconds) between per-source searches to respect rate limits.
+_CURATED_SEARCH_INTER_SOURCE_DELAY = 1.0
+
+
 def curated_ai_sources_search(query: str, limit: int = 40) -> Dict:
-    """Search across curated AI sources with resilient multi-engine fallback."""
+    """Search across curated AI sources with resilient multi-engine fallback.
+
+    Uses the duckduckgo_search SDK (preferred) with a short inter-source
+    delay to stay within rate limits.  Falls back to HTML scraping when
+    the SDK returns nothing.
+    """
     q = (query or "").strip()
     results: List[Dict[str, str]] = []
     seen = set()
+    cap = max(1, min(limit, 100))
 
-    for source in _CURATED_AI_NEWS_SOURCES:
+    for idx, source in enumerate(_CURATED_AI_NEWS_SOURCES):
+        if len(results) >= cap:
+            break
+
         source_url = source.get("url", "")
         domain = (urlparse(source_url).netloc or "").lower().replace("www.", "")
         if not domain:
             continue
+
+        # Polite delay between sources (skip before the first request).
+        if idx > 0:
+            time.sleep(_CURATED_SEARCH_INTER_SOURCE_DELAY)
+
         scoped_query = f"site:{domain} {q}".strip()
         found = multi_engine_web_search(scoped_query, max_results=4)
 
         for item in found.get("items") or []:
             item_url = item.get("url") or ""
+            # Accept results whose URL contains the target domain.
             if domain not in (urlparse(item_url).netloc or "").lower():
                 continue
             key = (item_url.lower(), (item.get("title") or "").lower())
@@ -420,10 +467,8 @@ def curated_ai_sources_search(query: str, limit: int = 40) -> Dict:
                     "source_home": source_url,
                 }
             )
-            if len(results) >= max(1, min(limit, 100)):
+            if len(results) >= cap:
                 break
-        if len(results) >= max(1, min(limit, 100)):
-            break
 
     return {
         "provider": "curated_ai_sources_search",

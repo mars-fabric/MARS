@@ -27,6 +27,7 @@ class DeepresearchCreateRequest(BaseModel):
     task: str = Field("", description="Research description / pitch")
     data_description: Optional[str] = Field(None, description="Optional description of uploaded data")
     config: Optional[Dict[str, Any]] = Field(None, description="Optional model overrides")
+    work_dir: Optional[str] = Field(None, description="Base work directory (from frontend config). If not provided, falls back to CMBAGENT_DEFAULT_WORK_DIR")
 
 
 class DeepresearchExecuteRequest(BaseModel):
