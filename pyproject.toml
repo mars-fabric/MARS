@@ -47,6 +47,9 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.13",
     "psycopg2-binary>=2.9",
+    "langgraph",
+    "fitz",
+    "frontend",
     
     # AG2 External Tools - LangChain and CrewAI free tools (enabled by default)
     "ag2[interop-langchain,interop-crewai]>=0.10.3",
