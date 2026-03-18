@@ -491,7 +491,7 @@ export default function Home() {
     }
     try {
       addConsoleOutput(`Creating branch "${name}" from node ${nodeId}...`)
-      const response = await fetch(`http://localhost:8000/api/runs/${currentRunId}/branch`, {
+      const response = await fetch(getApiUrl(`/api/runs/${currentRunId}/branch`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

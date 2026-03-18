@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { getApiUrl } from '@/lib/config';
 import { format } from 'date-fns';
 import {
   X,
@@ -109,14 +110,14 @@ export function NodeActionDialog({ node, runId, onClose, onPlayFromNode, onCreat
       const queryString = params.toString();
       
       // Fetch files
-      const filesRes = await fetch(`http://localhost:8000/api/nodes/${node.id}/files?${queryString}`);
+      const filesRes = await fetch(getApiUrl(`/api/nodes/${node.id}/files?${queryString}`));
       if (filesRes.ok) {
         const filesData = await filesRes.json();
         setFiles(filesData.files || []);
       }
 
       // Fetch events with run_id filter
-      const eventsRes = await fetch(`http://localhost:8000/api/nodes/${node.id}/events?${queryString}`);
+      const eventsRes = await fetch(getApiUrl(`/api/nodes/${node.id}/events?${queryString}`));
       if (eventsRes.ok) {
         const eventsData = await eventsRes.json();
         setEvents(eventsData.events || []);

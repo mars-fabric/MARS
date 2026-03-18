@@ -18,11 +18,18 @@ export const config = {
 };
 
 /**
- * Get the full API URL for a given endpoint
+ * Get the full API URL for a given endpoint.
+ * In the browser, returns a relative path so requests go through the Next.js
+ * proxy (same-origin, no CORS required). On the server side, returns the full URL.
  */
 export function getApiUrl(endpoint: string): string {
-  const base = config.apiUrl.replace(/\/$/, '');
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  // Browser: use relative path → routed through Next.js rewrite proxy
+  if (typeof window !== 'undefined') {
+    return path;
+  }
+  // Server-side (SSR/API routes): use full URL
+  const base = config.apiUrl.replace(/\/$/, '');
   return `${base}${path}`;
 }
 

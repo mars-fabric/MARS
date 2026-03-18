@@ -129,12 +129,37 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
   const lastMessageTimestamp = useRef<number>(Date.now());  
   // Store task and config for reconnection
   const taskDataRef = useRef<{ task: string; config: any } | null>(null);
+
+  // Console output buffer — batches rapid messages into one state update every 80ms
+  // to avoid a re-render per message (major lag source during heavy workflows)
+  const consoleBufferRef = useRef<string[]>([]);
+  const consoleFlushTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const MAX_CONSOLE_LINES = 5000;
+
   // Console helpers
   const addConsoleOutput = useCallback((output: string) => {
-    setConsoleOutput(prev => [...prev, output]);
+    consoleBufferRef.current.push(output);
+    if (!consoleFlushTimerRef.current) {
+      consoleFlushTimerRef.current = setTimeout(() => {
+        const batch = consoleBufferRef.current.splice(0);
+        if (batch.length > 0) {
+          setConsoleOutput(prev => {
+            const next = prev.concat(batch);
+            return next.length > MAX_CONSOLE_LINES ? next.slice(-MAX_CONSOLE_LINES) : next;
+          });
+        }
+        consoleFlushTimerRef.current = null;
+      }, 80);
+    }
   }, []);
 
   const clearConsole = useCallback(() => {
+    // Cancel any pending batched flush and clear the buffer
+    if (consoleFlushTimerRef.current) {
+      clearTimeout(consoleFlushTimerRef.current);
+      consoleFlushTimerRef.current = null;
+    }
+    consoleBufferRef.current = [];
     setConsoleOutput([]);
     setCostSummary({
       total_cost: 0,

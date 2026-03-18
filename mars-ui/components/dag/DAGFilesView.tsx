@@ -119,22 +119,38 @@ export function DAGFilesView({ runId, refreshTrigger }: DAGFilesViewProps) {
     if (!file.file_content) {
       setLoadingContent(true);
       try {
-        const response = await fetch(getApiUrl(`/api/files/content?file_path=${encodeURIComponent(file.file_path)}`));
+        const response = await fetch(getApiUrl(`/api/files/content?path=${encodeURIComponent(file.file_path)}`));
         if (response.ok) {
           const data = await response.json();
           if (data.content) {
             setSelectedFile({
               ...file,
               file_content: data.content,
-              content_type: data.content_type,
+              content_type: data.type || data.content_type,
               encoding: data.encoding,
               mime_type: data.mime_type
             });
-          } else if (data.content_type === 'binary') {
-            setSelectedFile({ ...file, file_content: `[Binary file - ${formatFileSize(data.size || file.size_bytes)}]\n\nThis file cannot be displayed as text.` });
+          } else if (data.type === 'binary' || data.content_type === 'binary') {
+            // For images, provide the serve URL so FilePreview can show them
+            const isImage = /\.(png|jpe?g|gif|svg|webp|bmp|tiff?|ico)$/i.test(file.file_name);
+            if (isImage) {
+              setSelectedFile({
+                ...file,
+                file_content: '__image__',
+                content_type: 'image',
+                mime_type: data.mime_type,
+              });
+            } else {
+              setSelectedFile({
+                ...file,
+                file_content: `[Binary file - ${formatFileSize(data.size || file.size_bytes)}]\n\nThis file cannot be displayed as text.`,
+                content_type: 'binary',
+              });
+            }
           }
         } else {
-          setSelectedFile({ ...file, file_content: `Error: ${response.status} ${response.statusText}` });
+          const errText = await response.text().catch(() => response.statusText);
+          setSelectedFile({ ...file, file_content: `Error: ${response.status} ${response.statusText}\n${errText}` });
         }
       } catch (error) {
         setSelectedFile({ ...file, file_content: 'Error loading file content' });
@@ -145,13 +161,12 @@ export function DAGFilesView({ runId, refreshTrigger }: DAGFilesViewProps) {
   };
 
   const handleDownload = (file: FileNode) => {
-    const blob = new Blob([file.file_content || ''], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
+    // Use the backend download endpoint for proper file downloads
+    const downloadUrl = getApiUrl(`/api/files/download?path=${encodeURIComponent(file.file_path)}`);
     const link = document.createElement('a');
-    link.href = url;
+    link.href = downloadUrl;
     link.download = file.file_name;
     link.click();
-    URL.revokeObjectURL(url);
   };
 
   const toggleDirectory = (path: string) => {
@@ -422,14 +437,14 @@ export function DAGFilesView({ runId, refreshTrigger }: DAGFilesViewProps) {
             <FilePreview
               fileName={selectedFile.file_name}
               filePath={selectedFile.file_path}
-              content={selectedFile.file_content}
+              content={selectedFile.file_content === '__image__' ? undefined : selectedFile.file_content}
               mimeType={selectedFile.mime_type}
               contentType={selectedFile.content_type}
               encoding={selectedFile.encoding}
               sizeBytes={selectedFile.size_bytes}
               base64Content={selectedFile.content_type === 'image' && selectedFile.encoding === 'base64' ? selectedFile.file_content || undefined : undefined}
               loading={loadingContent}
-              onDownload={selectedFile.file_content ? () => handleDownload(selectedFile) : undefined}
+              onDownload={() => handleDownload(selectedFile)}
             />
           </div>
         </div>

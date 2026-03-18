@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { Download, ExternalLink, File as FileIcon } from 'lucide-react'
 import { getFileIconConfig, isImageFile, isCSVFile, isMarkdownFile, isTextFile } from './fileIcons'
+import { getApiUrl } from '@/lib/config'
 import CodeViewer from './CodeViewer'
 import CSVTableViewer from './CSVTableViewer'
 import MarkdownRenderer from './MarkdownRenderer'
@@ -70,12 +71,16 @@ export default function FilePreview({
     )
   }
 
-  // Image preview — base64 or URL
+  // Image preview — base64, URL, or serve-image endpoint
   const isImg = isImageFile(fileName, mimeType)
   if (isImg) {
     const imgSrc = base64Content
       ? `data:${mimeType || 'image/png'};base64,${base64Content}`
-      : imageUrl || ''
+      : imageUrl
+        ? imageUrl
+        : filePath
+          ? getApiUrl(`/api/files/serve-image?path=${encodeURIComponent(filePath)}`)
+          : ''
 
     return (
       <div className="mars-file-viewer">

@@ -9,9 +9,10 @@ async function openUrl(url) {
 }
 
 // Start Next.js dev server
+// Use execFile-style spawn (no shell) to avoid DEP0190 deprecation
 const nextProcess = spawn('npx', ['next', 'dev'], {
   stdio: ['inherit', 'pipe', 'inherit'],
-  shell: true
+  shell: false,
 });
 
 let browserOpened = false;
