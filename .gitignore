@@ -74,6 +74,7 @@ docs/videos/*
 output_bkp
 docs/notebooks/output
 docs/notebooks/cmbagent_output
+cmbdir
 
 project_data
 docs/notebooks/*

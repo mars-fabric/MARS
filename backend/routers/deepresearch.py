@@ -1007,13 +1007,11 @@ async def refine_stage_content(task_id: str, stage_num: int, request: Deepresear
 
     try:
         def _call_llm():
-            from cmbagent.utils import get_api_keys_from_env
-            from openai import OpenAI
+            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
 
-            api_keys = get_api_keys_from_env()
-            client = OpenAI(api_key=api_keys.get("openai"))
+            client = create_openai_client()
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=resolve_model_for_provider("gpt-4o"),
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4096,
                 temperature=0.7,
@@ -1158,12 +1156,11 @@ async def refine_file_context(task_id: str, request: RefineContextRequest):
 
     try:
         def _call():
-            from cmbagent.utils import get_api_keys_from_env
-            from openai import OpenAI
-            api_keys = get_api_keys_from_env()
-            client = OpenAI(api_key=api_keys.get("openai"))
+            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
+
+            client = create_openai_client()
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=resolve_model_for_provider("gpt-4o"),
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=4096,
                 temperature=0.4,
@@ -1406,10 +1403,9 @@ async def _run_file_analysis(task_id: str, work_dir: str, buf_key: str):
                 "Sending file metadata to LLM for scientific analysis..."
             )
 
-        from cmbagent.utils import get_api_keys_from_env
-        from openai import OpenAI
-        api_keys = get_api_keys_from_env()
-        client = OpenAI(api_key=api_keys.get("openai"))
+        from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
+
+        client = create_openai_client()
 
         prompt = (
             "You are an expert research data analyst. Analyze the following research data files "
@@ -1442,7 +1438,7 @@ async def _run_file_analysis(task_id: str, work_dir: str, buf_key: str):
         )
 
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model=resolve_model_for_provider("gpt-4o"),
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=4000,
@@ -1674,12 +1670,11 @@ async def ai_edit_tex(task_id: str, request: AiEditTexRequest):
 
     try:
         def _call_llm():
-            from cmbagent.utils import get_api_keys_from_env
-            from openai import OpenAI
-            api_keys = get_api_keys_from_env()
-            client = OpenAI(api_key=api_keys.get("openai"))
+            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
+
+            client = create_openai_client()
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model=resolve_model_for_provider("gpt-4o"),
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
