@@ -101,33 +101,75 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
   return classes.filter(Boolean).join(' ')
 }
 
-/** Minimal Markdown → HTML renderer (headers, bold, italic, lists, links) */
+/** Markdown → HTML renderer (headers, bold, italic, lists, links, HR) */
 function renderMarkdown(text: string): string {
   let html = text
+
+  // --- block-level elements first (order matters) ---
+
+  // Horizontal rules — must come before list/para processing
+  html = html.replace(
+    /^---+$/gim,
+    '<hr style="border:none;border-top:1px solid var(--mars-color-border,#e5e7eb);margin:20px 0" />',
+  )
+
+  // Headers (h4 → h1, processed largest-first to avoid substring collision)
+  html = html.replace(
+    /^#### (.*$)/gim,
+    '<h4 style="font-size:0.875rem;font-weight:600;margin:12px 0 4px;color:var(--mars-color-text)">$1</h4>',
+  )
   html = html.replace(
     /^### (.*$)/gim,
-    '<h3 class="text-base font-semibold mt-3 mb-1">$1</h3>',
+    '<h3 style="font-size:1rem;font-weight:700;margin:16px 0 6px;color:var(--mars-color-text);padding-bottom:4px;border-bottom:1px solid var(--mars-color-border,#e5e7eb)">$1</h3>',
   )
   html = html.replace(
     /^## (.*$)/gim,
-    '<h2 class="text-lg font-bold mt-4 mb-2">$1</h2>',
+    '<h2 style="font-size:1.2rem;font-weight:800;margin:24px 0 8px;color:var(--mars-color-text);padding-bottom:6px;border-bottom:2px solid var(--mars-color-primary,#6366f1)">$1</h2>',
   )
   html = html.replace(
     /^# (.*$)/gim,
-    '<h1 class="text-xl font-bold mt-5 mb-3">$1</h1>',
+    '<h1 style="font-size:1.5rem;font-weight:900;margin:28px 0 10px;color:var(--mars-color-text)">$1</h1>',
   )
+
+  // Numbered lists
+  html = html.replace(
+    /^\d+\. (.*$)/gim,
+    '<li style="margin-left:20px;margin-bottom:6px;color:var(--mars-color-text-secondary);list-style-type:decimal">$1</li>',
+  )
+  // Bullet lists (* and -)
+  html = html.replace(
+    /^\* (.*$)/gim,
+    '<li style="margin-left:20px;margin-bottom:6px;color:var(--mars-color-text-secondary);list-style-type:disc">$1</li>',
+  )
+  html = html.replace(
+    /^- (.*$)/gim,
+    '<li style="margin-left:20px;margin-bottom:6px;color:var(--mars-color-text-secondary);list-style-type:disc">$1</li>',
+  )
+
+  // --- inline elements ---
+  // Bold + italic (***text***)
+  html = html.replace(/\*\*\*(.*?)\*\*\*/g, '<strong><em>$1</em></strong>')
+  // Bold (**text**)
   html = html.replace(
     /\*\*(.*?)\*\*/g,
-    '<strong class="font-semibold">$1</strong>',
+    '<strong style="font-weight:700;color:var(--mars-color-text)">$1</strong>',
   )
-  html = html.replace(/\*(.*?)\*/g, '<em class="italic">$1</em>')
-  html = html.replace(/^\* (.*$)/gim, '<li class="ml-4 mb-1">• $1</li>')
-  html = html.replace(/^- (.*$)/gim, '<li class="ml-4 mb-1">• $1</li>')
-  html = html.replace(/^\d+\. (.*$)/gim, '<li class="ml-4 mb-1">$1</li>')
+  // Italic (*text*) — only after bold is handled
+  html = html.replace(/\*([^*\n]+?)\*/g, '<em style="font-style:italic">$1</em>')
+
+  // Links
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" class="underline" style="color:var(--mars-color-primary)" target="_blank" rel="noopener noreferrer">$1</a>',
+    '<a href="$2" style="color:var(--mars-color-primary);text-decoration:underline" target="_blank" rel="noopener noreferrer">$1</a>',
   )
+
+  // Inline code (`code`)
+  html = html.replace(
+    /`([^`\n]+?)`/g,
+    '<code style="background:var(--mars-color-surface-overlay,#f3f4f6);padding:1px 5px;border-radius:4px;font-family:monospace;font-size:0.85em">$1</code>',
+  )
+
+  // Line breaks
   html = html.replace(/\n\n/g, '<br/><br/>')
   html = html.replace(/\n/g, '<br/>')
   return html
@@ -2521,6 +2563,42 @@ function SlideStep({
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// SHARED COPY BUTTON — defined outside SummaryStep to avoid re-creation
+// ═══════════════════════════════════════════════════════════════════════════
+function SummaryCopyBtn({
+  id,
+  label,
+  content,
+  copied,
+  onCopy,
+}: {
+  id: string
+  label: string
+  content: string
+  copied: string | null
+  onCopy: (id: string, content: string) => void
+}) {
+  return (
+    <button
+      className="w-full flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:opacity-80 transition-colors"
+      style={{
+        borderColor: 'var(--mars-color-border)',
+        color: 'var(--mars-color-text-secondary)',
+        background: 'var(--mars-color-surface)',
+      }}
+      onClick={() => onCopy(id, content)}
+    >
+      {copied === id ? (
+        <Check className="w-4 h-4 flex-shrink-0" style={{ color: '#22c55e' }} />
+      ) : (
+        <Copy className="w-4 h-4 flex-shrink-0" />
+      )}
+      <span>{copied === id ? 'Copied!' : label}</span>
+    </button>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // STEP 8 — SUMMARY
 // ═══════════════════════════════════════════════════════════════════════════
 function SummaryStep({
@@ -2531,6 +2609,7 @@ function SummaryStep({
   onReset: () => void
 }) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'overview' | 'report'>('overview')
 
   const selectedOpportunity = state.opportunities.find(
     (o) => o.id === state.selectedOpportunity,
@@ -2540,7 +2619,10 @@ function SummaryStep({
   )
   const selectedFeatures = state.features.filter((f) => f.selected)
 
-  const generateFullSummary = () => {
+  // Memoise so the large string is only rebuilt when state changes,
+  // and copy-button callbacks always receive the same stable reference.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fullReport = React.useMemo(() => {
     const researchSection = state.researchSummary ? `
 ## Research Summary
 
@@ -2585,6 +2667,10 @@ ${(Array.isArray(state.problemDefinition.reframingExamples) ? state.problemDefin
 ${(state.problemDefinition.references || []).map((r) => `- ${r}`).join('\n')}
 ` : ''
 
+    const selOpp = state.opportunities.find((o) => o.id === state.selectedOpportunity)
+    const selArch = state.solutionArchetypes.find((a) => a.id === state.selectedArchetype)
+    const selFeats = state.features.filter((f) => f.selected)
+
     const allOpportunities = state.opportunities.length > 0 ? `
 ## All Opportunity Areas Evaluated
 
@@ -2611,8 +2697,8 @@ ${a.references?.length ? `- **References:** ${a.references.join(', ')}` : ''}
     const allFeatures = state.features.length > 0 ? `
 ## Complete Feature Set
 
-### Selected Features (${selectedFeatures.length})
-${selectedFeatures.map((f, i) => `#### ${i + 1}. ${f.name} (${f.priority})
+### Selected Features (${selFeats.length})
+${selFeats.map((f, i) => `#### ${i + 1}. ${f.name} (${f.priority})
 - **Description:** ${f.description}
 - **Strategic Goal:** ${f.strategicGoal}
 - **User Stories:**
@@ -2640,9 +2726,9 @@ ${state.features.filter(f => !f.selected).map((f, i) => `${i + 1}. **${f.name}**
 
 This report presents the findings of a comprehensive product discovery engagement conducted for **${state.intakeData?.clientName}** in the **${state.intakeData?.industry} — ${state.intakeData?.subIndustry}** space. The discovery focused on the **${state.intakeData?.businessFunction}** function, investigating challenges related to: *${state.intakeData?.problemKeywords}*.
 
-**Selected Opportunity:** ${selectedOpportunity?.title} (${selectedOpportunity?.valueCategory})
-**Proposed Solution:** ${selectedArchetype?.title}
-**Features Identified:** ${state.features.length} total, ${selectedFeatures.length} selected for implementation
+**Selected Opportunity:** ${selOpp?.title} (${selOpp?.valueCategory})
+**Proposed Solution:** ${selArch?.title}
+**Features Identified:** ${state.features.length} total, ${selFeats.length} selected for implementation
 
 ---
 
@@ -2664,21 +2750,21 @@ ${allOpportunities}
 ---
 
 ## Selected Opportunity — Deep Dive
-**${selectedOpportunity?.title}**
-${selectedOpportunity?.explanation}
-- **Value Category:** ${selectedOpportunity?.valueCategory}
-- **KPIs:** ${(selectedOpportunity?.kpis || []).join(', ')}
-- **Why Now:** ${selectedOpportunity?.whyNow}
+**${selOpp?.title}**
+${selOpp?.explanation}
+- **Value Category:** ${selOpp?.valueCategory}
+- **KPIs:** ${(selOpp?.kpis || []).join(', ')}
+- **Why Now:** ${selOpp?.whyNow}
 
 ---
 ${allArchetypes}
 ---
 
 ## Selected Solution — Deep Dive
-**${selectedArchetype?.title}**
-${selectedArchetype?.summary}
-- **Personas:** ${(selectedArchetype?.personas || []).join(', ')}
-- **Benefits:** ${(selectedArchetype?.benefits || []).map((b, i) => `\n  ${i + 1}. ${b}`).join('')}
+**${selArch?.title}**
+${selArch?.summary}
+- **Personas:** ${(selArch?.personas || []).join(', ')}
+- **Benefits:** ${(selArch?.benefits || []).map((b, i) => `\n  ${i + 1}. ${b}`).join('')}
 
 ---
 ${allFeatures}
@@ -2705,9 +2791,10 @@ ${state.slideContent || ''}
 *Report generated by MARS Product Discovery Assistant (PDA)*
 *Domain Consulting Group © ${new Date().getFullYear()}*
 `
-  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state])
 
-  const handleCopy = async (key: string, content: string) => {
+  const handleCopy = useCallback(async (key: string, content: string) => {
     try {
       await navigator.clipboard.writeText(content)
       setCopied(key)
@@ -2716,270 +2803,293 @@ ${state.slideContent || ''}
     } catch {
       notify('Failed to copy', 'error')
     }
-  }
-
-  const CopyBtn = ({
-    id,
-    label,
-    content,
-  }: {
-    id: string
-    label: string
-    content: string
-  }) => (
-    <button
-      className="w-full flex items-center gap-2 px-3 py-2 text-sm border rounded-md hover:opacity-80 transition-colors"
-      style={{
-        borderColor: 'var(--mars-color-border)',
-        color: 'var(--mars-color-text-secondary)',
-      }}
-      onClick={() => handleCopy(id, content)}
-    >
-      {copied === id ? (
-        <Check className="w-4 h-4" />
-      ) : (
-        <Copy className="w-4 h-4" />
-      )}
-      {label}
-    </button>
-  )
+  }, [])
 
   return (
-    <div className="max-w-5xl mx-auto py-8 px-4 space-y-6">
+    <div className="max-w-5xl mx-auto py-6 px-4 space-y-5">
+
+      {/* ── Header ── */}
       <div className="flex items-center justify-between">
         <div>
-          <h2
-            className="text-2xl font-bold"
-            style={{ color: 'var(--mars-color-text)' }}
-          >
+          <h2 className="text-2xl font-bold" style={{ color: 'var(--mars-color-text)' }}>
             Discovery Complete!
           </h2>
-          <p
-            className="text-sm mt-1"
-            style={{ color: 'var(--mars-color-text-secondary)' }}
-          >
-            Here's your comprehensive product discovery summary
+          <p className="text-sm mt-1" style={{ color: 'var(--mars-color-text-secondary)' }}>
+            Your full product discovery report is ready.
           </p>
         </div>
         <button
           className="flex items-center gap-1 px-3 py-1.5 text-sm font-medium border rounded-md hover:opacity-80"
-          style={{
-            borderColor: 'var(--mars-color-border)',
-            color: 'var(--mars-color-text-secondary)',
-          }}
+          style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}
           onClick={onReset}
         >
           <RotateCcw className="w-4 h-4" /> New Session
         </button>
       </div>
 
-      {/* Overview card */}
-      <Card className="p-5 space-y-4">
-        <h3
-          className="font-semibold"
-          style={{ color: 'var(--mars-color-text)' }}
-        >
-          Session Overview
-        </h3>
-        <div>
-          <span
-            className="text-xs font-semibold"
-            style={{ color: 'var(--mars-color-text-tertiary)' }}
-          >
-            Client
-          </span>
-          <p style={{ color: 'var(--mars-color-text)' }}>
-            {state.intakeData?.clientName}
-          </p>
-          <p
-            className="text-sm"
-            style={{ color: 'var(--mars-color-text-secondary)' }}
-          >
-            {state.intakeData?.industry} - {state.intakeData?.subIndustry} •{' '}
-            {state.intakeData?.businessFunction}
-          </p>
-        </div>
-        <hr style={{ borderColor: 'var(--mars-color-border)' }} />
-        <div>
-          <span
-            className="text-xs font-semibold"
-            style={{ color: 'var(--mars-color-text-tertiary)' }}
-          >
-            Selected Opportunity
-          </span>
-          <div className="flex items-start gap-2 mt-1">
-            <span
-              className="text-xs px-2 py-0.5 rounded-full"
-              style={{
-                backgroundColor: 'var(--mars-color-primary-subtle)',
-                color: 'var(--mars-color-primary-text)',
-              }}
-            >
-              {selectedOpportunity?.valueCategory}
-            </span>
-            <span
-              className="text-sm"
-              style={{ color: 'var(--mars-color-text)' }}
-            >
-              {selectedOpportunity?.title}
-            </span>
-          </div>
-        </div>
-        <hr style={{ borderColor: 'var(--mars-color-border)' }} />
-        <div>
-          <span
-            className="text-xs font-semibold"
-            style={{ color: 'var(--mars-color-text-tertiary)' }}
-          >
-            Solution Archetype
-          </span>
-          <p
-            className="text-sm mt-1"
-            style={{ color: 'var(--mars-color-text)' }}
-          >
-            {selectedArchetype?.title}
-          </p>
-        </div>
-        <hr style={{ borderColor: 'var(--mars-color-border)' }} />
-        <div>
-          <span
-            className="text-xs font-semibold"
-            style={{ color: 'var(--mars-color-text-tertiary)' }}
-          >
-            Features
-          </span>
-          <p
-            className="text-sm mt-1"
-            style={{ color: 'var(--mars-color-text-secondary)' }}
-          >
-            {selectedFeatures.length} features selected
-          </p>
-        </div>
-      </Card>
-
-      {/* Action cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card className="p-5 space-y-3">
-          <h3
-            className="font-semibold"
-            style={{ color: 'var(--mars-color-text)' }}
-          >
-            Prototype Prompts
-          </h3>
-          <CopyBtn
-            id="lovable"
-            label="Copy Lovable Prompt"
-            content={state.prompts?.lovable || ''}
-          />
-          <CopyBtn
-            id="googleAI"
-            label="Copy Google AI Prompt"
-            content={state.prompts?.googleAI || ''}
-          />
-          <CopyBtn
-            id="general"
-            label="Copy General Prompt"
-            content={state.prompts?.general || ''}
-          />
-        </Card>
-
-        <Card className="p-5 space-y-3">
-          <h3
-            className="font-semibold"
-            style={{ color: 'var(--mars-color-text)' }}
-          >
-            Export Options
-          </h3>
-          <CopyBtn
-            id="slides"
-            label="Copy Slide Content"
-            content={state.slideContent || ''}
-          />
-          <CopyBtn
-            id="full"
-            label="Copy Full Report"
-            content={generateFullSummary()}
-          />
-          <button
-            className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-md text-white"
-            style={{ backgroundColor: 'var(--mars-color-primary)' }}
-            onClick={() => {
-              const blob = new Blob([generateFullSummary()], {
-                type: 'text/markdown',
-              })
-              const url = URL.createObjectURL(blob)
-              const a = document.createElement('a')
-              a.href = url
-              a.download = `discovery-report-${state.intakeData?.clientName?.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0,10)}.md`
-              a.click()
-              notify('Downloaded full report')
+      {/* ── Stats row ── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: 'Client', value: state.intakeData?.clientName },
+          { label: 'Industry', value: `${state.intakeData?.industry}` },
+          { label: 'Opportunity', value: selectedOpportunity?.title, accent: true },
+          { label: 'Features', value: `${selectedFeatures.length} selected` },
+        ].map(({ label, value, accent }) => (
+          <div
+            key={label}
+            className="rounded-lg p-3 border"
+            style={{
+              borderColor: accent ? 'var(--mars-color-primary)' : 'var(--mars-color-border)',
+              backgroundColor: accent ? 'var(--mars-color-primary-subtle)' : 'var(--mars-color-surface)',
             }}
           >
-            <Download className="w-4 h-4" />
-            Download Full Report (.md)
-          </button>
-        </Card>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-1"
+              style={{ color: accent ? 'var(--mars-color-primary)' : 'var(--mars-color-text-tertiary)' }}>
+              {label}
+            </p>
+            <p className="text-sm font-medium truncate"
+              style={{ color: 'var(--mars-color-text)' }}>
+              {value || '—'}
+            </p>
+          </div>
+        ))}
       </div>
 
-      {/* Problem & Research Highlights */}
-      {state.problemDefinition && (
-        <Card className="p-5 space-y-3">
-          <h3 className="font-semibold" style={{ color: 'var(--mars-color-text)' }}>
-            Problem Statement
-          </h3>
-          <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
-            {state.problemDefinition.problemStatement}
-          </p>
-          {state.problemDefinition.rootCause && (
-            <>
-              <h4 className="text-sm font-semibold mt-2" style={{ color: 'var(--mars-color-text)' }}>
-                Root Cause Analysis
-              </h4>
-              <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
-                {state.problemDefinition.rootCause}
+      {/* ── Tab bar ── */}
+      <div className="flex gap-1 border-b" style={{ borderColor: 'var(--mars-color-border)' }}>
+        {(['overview', 'report'] as const).map((tab) => (
+          <button
+            key={tab}
+            className="px-4 py-2 text-sm font-medium capitalize transition-colors"
+            style={{
+              color: activeTab === tab ? 'var(--mars-color-primary)' : 'var(--mars-color-text-secondary)',
+              borderBottom: activeTab === tab ? '2px solid var(--mars-color-primary)' : '2px solid transparent',
+              marginBottom: '-1px',
+            }}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab === 'overview' ? 'Overview & Export' : 'Full Report'}
+          </button>
+        ))}
+      </div>
+
+      {/* ═══ OVERVIEW TAB ═══ */}
+      {activeTab === 'overview' && (
+        <div className="space-y-5">
+
+          {/* Export actions */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Prompts */}
+            <Card className="p-5 space-y-3">
+              <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--mars-color-text)' }}>
+                <Sparkles className="w-4 h-4" style={{ color: 'var(--mars-color-primary)' }} />
+                Prototype Prompts
+              </h3>
+              <SummaryCopyBtn id="lovable" label="Copy Lovable Prompt"
+                content={state.prompts?.lovable || ''} copied={copied} onCopy={handleCopy} />
+              <SummaryCopyBtn id="googleAI" label="Copy Google AI Prompt"
+                content={state.prompts?.googleAI || ''} copied={copied} onCopy={handleCopy} />
+              <SummaryCopyBtn id="general" label="Copy General LLM Prompt"
+                content={state.prompts?.general || ''} copied={copied} onCopy={handleCopy} />
+            </Card>
+
+            {/* Export */}
+            <Card className="p-5 space-y-3">
+              <h3 className="font-semibold flex items-center gap-2" style={{ color: 'var(--mars-color-text)' }}>
+                <Download className="w-4 h-4" style={{ color: 'var(--mars-color-primary)' }} />
+                Export Report
+              </h3>
+              <SummaryCopyBtn id="slides" label="Copy Slide Content"
+                content={state.slideContent || ''} copied={copied} onCopy={handleCopy} />
+              <SummaryCopyBtn id="full" label="Copy Full Report (Markdown)"
+                content={fullReport} copied={copied} onCopy={handleCopy} />
+              <button
+                className="w-full flex items-center justify-center gap-2 px-3 py-2 text-sm font-semibold rounded-md text-white"
+                style={{ backgroundColor: 'var(--mars-color-primary)' }}
+                onClick={() => {
+                  const blob = new Blob([fullReport], { type: 'text/markdown' })
+                  const url = URL.createObjectURL(blob)
+                  const a = document.createElement('a')
+                  a.href = url
+                  a.download = `discovery-report-${state.intakeData?.clientName?.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.md`
+                  a.click()
+                  URL.revokeObjectURL(url)
+                  notify('Downloaded full report')
+                }}
+              >
+                <Download className="w-4 h-4" />
+                Download Full Report (.md)
+              </button>
+            </Card>
+          </div>
+
+          {/* Problem statement */}
+          {state.problemDefinition && (
+            <Card className="p-5">
+              <h3 className="font-semibold mb-2" style={{ color: 'var(--mars-color-text)' }}>
+                Problem Statement
+              </h3>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                {state.problemDefinition.problemStatement}
               </p>
-            </>
+              {state.problemDefinition.rootCause && (
+                <>
+                  <h4 className="text-sm font-semibold mt-4 mb-1" style={{ color: 'var(--mars-color-text)' }}>
+                    Root Cause
+                  </h4>
+                  <p className="text-sm leading-relaxed" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                    {state.problemDefinition.rootCause}
+                  </p>
+                </>
+              )}
+            </Card>
           )}
-        </Card>
-      )}
 
-      {/* Selected Features Summary */}
-      {selectedFeatures.length > 0 && (
-        <Card className="p-5 space-y-3">
-          <h3 className="font-semibold" style={{ color: 'var(--mars-color-text)' }}>
-            Selected Features ({selectedFeatures.length})
-          </h3>
-          <div className="space-y-2">
-            {selectedFeatures.map((f) => (
-              <div key={f.id} className="flex items-start gap-2 text-sm">
-                <span className="text-xs px-2 py-0.5 rounded-full font-medium mt-0.5"
-                  style={{
-                    backgroundColor: f.priority === 'Must' ? '#fee2e2' : f.priority === 'Should' ? '#fef3c7' : '#dbeafe',
-                    color: f.priority === 'Must' ? '#991b1b' : f.priority === 'Should' ? '#92400e' : '#1e40af',
-                  }}>
-                  {f.priority}
-                </span>
-                <div>
-                  <span className="font-medium" style={{ color: 'var(--mars-color-text)' }}>{f.name}</span>
-                  <span style={{ color: 'var(--mars-color-text-secondary)' }}> — {f.description}</span>
-                </div>
+          {/* Solution summary */}
+          {selectedArchetype && (
+            <Card className="p-5">
+              <h3 className="font-semibold mb-2" style={{ color: 'var(--mars-color-text)' }}>
+                Proposed Solution — {selectedArchetype.title}
+              </h3>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                {selectedArchetype.summary}
+              </p>
+              {(selectedArchetype.benefits || []).length > 0 && (
+                <ul className="mt-3 space-y-1">
+                  {selectedArchetype.benefits.slice(0, 5).map((b, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                      <span className="mt-0.5 w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                        style={{ backgroundColor: 'var(--mars-color-primary-subtle)', color: 'var(--mars-color-primary)' }}>
+                        {i + 1}
+                      </span>
+                      {b}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
+
+          {/* Features */}
+          {selectedFeatures.length > 0 && (
+            <Card className="p-5">
+              <h3 className="font-semibold mb-3" style={{ color: 'var(--mars-color-text)' }}>
+                Selected Features ({selectedFeatures.length})
+              </h3>
+              <div className="space-y-2">
+                {selectedFeatures.map((f) => (
+                  <div key={f.id} className="flex items-start gap-3 p-3 rounded-lg border"
+                    style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface-overlay)' }}>
+                    <span className="text-xs px-2 py-0.5 rounded-full font-semibold flex-shrink-0 mt-0.5"
+                      style={{
+                        backgroundColor: f.priority === 'Must' ? '#fee2e2' : f.priority === 'Should' ? '#fef3c7' : '#dbeafe',
+                        color: f.priority === 'Must' ? '#991b1b' : f.priority === 'Should' ? '#92400e' : '#1e40af',
+                      }}>
+                      {f.priority}
+                    </span>
+                    <div>
+                      <span className="text-sm font-semibold" style={{ color: 'var(--mars-color-text)' }}>{f.name}</span>
+                      <p className="text-xs mt-0.5" style={{ color: 'var(--mars-color-text-secondary)' }}>{f.description}</p>
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-        </Card>
+            </Card>
+          )}
+        </div>
       )}
 
-      {/* Slide Content Preview */}
-      {state.slideContent && (
-        <Card className="p-5 space-y-3">
-          <h3 className="font-semibold" style={{ color: 'var(--mars-color-text)' }}>
-            Report / Slide Content Preview
-          </h3>
-          <div className="max-h-96 overflow-y-auto border rounded-md p-4"
-            style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
-            <Md content={state.slideContent} />
+      {/* ═══ FULL REPORT TAB ═══ */}
+      {activeTab === 'report' && (
+        <div className="space-y-4">
+          {/* Report toolbar */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+              Complete discovery report — scroll to read; copy or download below.
+            </p>
+            <div className="flex gap-2">
+              <SummaryCopyBtn id="full-report-tab" label="Copy Report"
+                content={fullReport} copied={copied} onCopy={handleCopy} />
+            </div>
           </div>
-        </Card>
+
+          {/* Report body */}
+          <div
+            className="rounded-xl border overflow-y-auto"
+            style={{
+              borderColor: 'var(--mars-color-border)',
+              backgroundColor: 'var(--mars-color-surface)',
+              minHeight: '600px',
+              maxHeight: '80vh',
+            }}
+          >
+            {/* Report header banner */}
+            <div className="px-8 py-6 border-b"
+              style={{
+                borderColor: 'var(--mars-color-border)',
+                background: 'linear-gradient(135deg, var(--mars-color-primary-subtle,#ede9fe), var(--mars-color-surface,#fff))',
+              }}>
+              <p className="text-xs font-semibold uppercase tracking-widest mb-1"
+                style={{ color: 'var(--mars-color-primary)' }}>
+                Product Discovery Report
+              </p>
+              <h1 className="text-2xl font-bold mb-1" style={{ color: 'var(--mars-color-text)' }}>
+                {state.intakeData?.clientName}
+              </h1>
+              <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                {state.intakeData?.industry} — {state.intakeData?.subIndustry} &nbsp;·&nbsp; {state.intakeData?.businessFunction}
+              </p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <span className="text-xs px-2 py-0.5 rounded-full border"
+                  style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}>
+                  {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full border"
+                  style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}>
+                  {state.intakeData?.researchMode === 'planning_and_control' ? 'Deep Research' : 'One-Shot Research'}
+                </span>
+                <span className="text-xs px-2 py-0.5 rounded-full"
+                  style={{ backgroundColor: 'var(--mars-color-primary-subtle)', color: 'var(--mars-color-primary)' }}>
+                  {state.intakeData?.discoveryType} Discovery
+                </span>
+              </div>
+            </div>
+
+            {/* Rendered report body */}
+            <div className="px-8 py-6" style={{ lineHeight: '1.7' }}>
+              <Md content={fullReport} />
+            </div>
+
+            {/* Footer */}
+            <div className="px-8 py-4 border-t text-center"
+              style={{ borderColor: 'var(--mars-color-border)' }}>
+              <p className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
+                Report generated by MARS Product Discovery Assistant (PDA) · Domain Consulting Group © {new Date().getFullYear()}
+              </p>
+            </div>
+          </div>
+
+          {/* Bottom download bar */}
+          <div className="flex gap-3 justify-end">
+            <button
+              className="flex items-center gap-2 px-4 py-2 text-sm font-semibold rounded-md text-white"
+              style={{ backgroundColor: 'var(--mars-color-primary)' }}
+              onClick={() => {
+                const blob = new Blob([fullReport], { type: 'text/markdown' })
+                const url = URL.createObjectURL(blob)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `discovery-report-${state.intakeData?.clientName?.replace(/\s+/g, '-').toLowerCase()}-${new Date().toISOString().slice(0, 10)}.md`
+                a.click()
+                URL.revokeObjectURL(url)
+                notify('Downloaded full report')
+              }}
+            >
+              <Download className="w-4 h-4" />
+              Download .md
+            </button>
+          </div>
+        </div>
       )}
     </div>
   )
