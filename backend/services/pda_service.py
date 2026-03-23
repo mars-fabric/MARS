@@ -473,14 +473,26 @@ Return ONLY valid JSON with no markdown formatting, using this exact structure:
 
     parsed = _extract_json_object(content)
     if parsed:
+        # Coerce problemKeywords to a plain string — the LLM sometimes returns a list
+        pk = parsed.get("problemKeywords", "")
+        if isinstance(pk, list):
+            pk = ", ".join(str(x) for x in pk)
+
+        def _to_list(v):
+            if isinstance(v, list):
+                return v
+            if isinstance(v, str):
+                return [x.strip() for x in v.split(",") if x.strip()]
+            return []
+
         return {
             "industry": parsed.get("industry", ""),
             "subIndustry": parsed.get("subIndustry", ""),
             "clientContext": parsed.get("clientContext", ""),
-            "businessFunctions": parsed.get("businessFunctions", []),
-            "suggestedDiscoveryTypes": parsed.get("suggestedDiscoveryTypes", []),
-            "problemKeywords": parsed.get("problemKeywords", ""),
-            "suggestedBusinessFunctions": parsed.get("suggestedBusinessFunctions", []),
+            "businessFunctions": _to_list(parsed.get("businessFunctions", [])),
+            "suggestedDiscoveryTypes": _to_list(parsed.get("suggestedDiscoveryTypes", [])),
+            "problemKeywords": pk,
+            "suggestedBusinessFunctions": _to_list(parsed.get("suggestedBusinessFunctions", [])),
         }
 
     return {

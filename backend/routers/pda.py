@@ -191,6 +191,12 @@ async def api_client_details(request: ClientDetailsRequest):
     try:
         from services.pda_service import get_client_details
         result = await get_client_details(request.clientName)
+        # Normalise fields that the LLM occasionally returns as lists instead of strings
+        if isinstance(result.get("problemKeywords"), list):
+            result["problemKeywords"] = ", ".join(str(x) for x in result["problemKeywords"])
+        for list_field in ("businessFunctions", "suggestedDiscoveryTypes", "suggestedBusinessFunctions"):
+            if isinstance(result.get(list_field), str):
+                result[list_field] = [x.strip() for x in result[list_field].split(",") if x.strip()]
         return ClientDetailsResponse(**result)
     except Exception as e:
         logger.error("client-details failed: %s\n%s", e, traceback.format_exc())
