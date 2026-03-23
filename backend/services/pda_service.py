@@ -20,6 +20,7 @@ import os
 import re
 import traceback
 import uuid
+from datetime import date
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from typing import Any, Dict, List, Optional
@@ -1131,6 +1132,8 @@ async def generate_slide_content(
         for f in features if f.get("selected", False)
     )
 
+    today = date.today().strftime("%B %d, %Y")
+
     # -----------------------------------------------------------------------
     # Context block shared by both prompt parts
     # -----------------------------------------------------------------------
@@ -1178,7 +1181,7 @@ Selected Features:
 Generate the following 15 slides. Each slide must have 4-6 specific bullet points drawn from the context above.
 
 ## Slide 1: Title Slide
-Generate: engagement title, client name, discovery engagement summary, date, audience, confidentiality notice.
+Generate: engagement title, client name, discovery engagement summary, date (use exactly: {today}), audience, confidentiality notice.
 
 ## Slide 2: Executive Summary
 Generate: core problem and business impact, market urgency, selected opportunity and rationale, proposed solution, expected outcomes, recommended next steps.
@@ -1307,6 +1310,14 @@ Use ## for slide titles and - for bullet points. 4-5 bullets per slide."""
         content = await _async_llm_direct(fallback_prompt, slide_system, max_tokens=5000)
     else:
         content = part1.rstrip() + "\n\n" + part2.lstrip()
+
+    # Replace any residual date placeholders the LLM may have emitted
+    content = re.sub(
+        r'\[Insert\s+Date\]|\[Date\]|\[insert\s+date\]',
+        today,
+        content,
+        flags=re.IGNORECASE,
+    )
 
     return content
 
