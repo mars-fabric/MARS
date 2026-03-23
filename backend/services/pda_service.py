@@ -1115,9 +1115,8 @@ async def generate_slide_content(
     features: List[Dict[str, Any]],
 ) -> str:
     """
-    Step 7: Generate COMPREHENSIVE presentation slide content.
+    Step 7: Generate comprehensive executive presentation slide content.
     Uses direct LLM for structured Markdown generation.
-    Generates a very long, detailed report (30+ slides, 5000+ words).
     """
     feature_list = "\n".join(
         f"- **{f.get('name', '')}** ({f.get('priority', '')}): {f.get('description', '')}"
@@ -1132,246 +1131,183 @@ async def generate_slide_content(
         for f in features if f.get("selected", False)
     )
 
-    prompt = f"""You are a senior presentation expert, management consultant, and product strategist at Domain Consulting Group. Generate an EXTREMELY COMPREHENSIVE, executive-ready presentation report for this product discovery engagement. This is the FINAL deliverable that goes to the C-suite — it must be thorough, data-rich, and professional.
+    # -----------------------------------------------------------------------
+    # Context block shared by both prompt parts
+    # -----------------------------------------------------------------------
+    context_block = f"""ENGAGEMENT CONTEXT:
+Client: {intake_data.get('clientName', '')}
+Industry: {intake_data.get('industry', '')} — {intake_data.get('subIndustry', '')}
+Client Context: {intake_data.get('clientContext', '')}
+Business Function: {intake_data.get('businessFunction', '')}
+Problem Focus: {intake_data.get('problemKeywords', '')}
 
-CRITICAL REQUIREMENTS:
-1. This report MUST be 5,000-8,000 words minimum. Do NOT be brief. Every section needs DEEP detail.
-2. ALL statistics, market sizes, growth rates, ROI figures, improvement percentages, and benchmark data MUST be REAL and VERIFIABLE from actual industry sources (Gartner, McKinsey, Forrester, Statista, IDC, Deloitte, BCG, company earnings, SEC filings).
-3. NEVER fabricate numbers. If you say "40% improvement" or "$4B market", it MUST be a real documented figure.
-4. Include source citations in parentheses after data points, e.g., "(Source: Gartner 2024)" or "(McKinsey Global Survey, 2023)".
-5. Each slide section should have 8-15 detailed bullet points with substantive content.
-6. Include detailed speaker notes for EVERY slide marked with [SPEAKER NOTES: ...]
+Research Findings:
+{research[:1500]}
 
-Client Information:
-- Client: {intake_data.get('clientName', '')}
-- Industry: {intake_data.get('industry', '')} - {intake_data.get('subIndustry', '')}
-- Client Context: {intake_data.get('clientContext', '')}
-- Business Function: {intake_data.get('businessFunction', '')}
-- Process Type: {'Existing Process - ' + intake_data.get('existingFunctionality', '') if intake_data.get('processType') == 'existing' else 'New Process'}
-- Problem Keywords: {intake_data.get('problemKeywords', '')}
+Problem Definition:
+{problem[:1000]}
 
-Research Context:
-{research}
-
-Problem:
-{problem}
-
-Opportunity: {opportunity.get('title', '')}
+Selected Opportunity: {opportunity.get('title', '')}
 {opportunity.get('explanation', '')}
 Value Category: {opportunity.get('valueCategory', '')}
 KPIs: {', '.join(opportunity.get('kpis', []))}
 Why Now: {opportunity.get('whyNow', '')}
-Implementation Notes: {opportunity.get('implementationNotes', '')}
 
-Solution: {archetype.get('title', '')}
+Proposed Solution: {archetype.get('title', '')}
 {archetype.get('summary', '')}
 Core Approach: {archetype.get('coreApproach', '')}
 Technology Enablers: {', '.join(archetype.get('technologyEnablers', []))}
 Implementation Complexity: {archetype.get('implementationComplexity', '')}
 
-Features (with descriptions):
-{feature_list}
+Selected Features:
+{feature_list}"""
 
-Feature User Stories:
-{feature_stories}
+    slide_system = (
+        "You are a senior management consultant preparing an executive presentation. "
+        "Generate professional, substantive slide content based only on the engagement context provided. "
+        "Use ## for slide titles and - for bullet points. Be concise but specific."
+    )
 
-Feature Success Metrics:
-{feature_metrics}
+    # -----------------------------------------------------------------------
+    # Part 1 — Slides 1–15 (discovery, research, opportunity, solution)
+    # -----------------------------------------------------------------------
+    prompt_part1 = f"""{context_block}
 
-### REQUIRED SLIDE STRUCTURE — Generate ALL of these sections with MAXIMUM detail:
+---
+
+Generate the following 15 slides. Each slide must have 4-6 specific bullet points drawn from the context above.
 
 ## Slide 1: Title Slide
-- Engagement title, client name, date, DCG branding, engagement team
+Generate: engagement title, client name, discovery engagement summary, date, audience, confidentiality notice.
 
-## Slide 2: Table of Contents
-- Numbered list of all sections
+## Slide 2: Executive Summary
+Generate: core problem and business impact, market urgency, selected opportunity and rationale, proposed solution, expected outcomes, recommended next steps.
 
-## Slide 3: Executive Summary
-- 8-10 bullets covering: the problem, market context, selected opportunity, proposed solution, expected impact, timeline, investment range, and strategic alignment
-- [SPEAKER NOTES: 3-4 sentences framing the narrative]
+## Slide 3: Engagement Methodology
+Generate: discovery approach and phases, research methods applied, how insights were validated and prioritized.
 
-## Slide 4: Engagement Overview & Methodology
-- Discovery methodology used, stakeholders involved, research approach, data sources consulted
-- 6-8 bullets detailing the rigorous approach
+## Slide 4: Client Current State Assessment
+Generate: current landscape in this business function, existing capabilities and gaps, digital maturity and performance baseline.
 
-## Slide 5: Client Landscape & Current State
-- Detailed analysis of the client's current position: market share, digital maturity, organizational structure, tech stack, recent initiatives
-- 8-10 bullets with real data about the client
+## Slide 5: Problem Statement
+Generate: clear problem definition, evidence confirming the problem, root cause analysis, quantified business impact, cost of inaction.
 
-## Slide 6: Problem Statement Deep Dive
-- The core problem with evidence and urgency
-- Root cause analysis (3 levels deep)
-- Impact quantification with real metrics
-- 10-12 bullets with specific data
+## Slide 6: Market & Industry Context
+Generate: key industry trends, market dynamics, technology maturity, regulatory considerations, competitive implications.
 
-## Slide 7: Market Context & Industry Trends
-- 8-12 key market trends with REAL data points and sources
-- Market size, growth rates, adoption curves — all verifiable
+## Slide 7: Industry Benchmarks & Landscape
+Generate: how leading organizations address similar challenges, benchmark performance levels, differentiation opportunities for the client.
 
-## Slide 8: Competitive Landscape Analysis
-- 8-10 real competitor moves with company names, dates, and specifics
-- Market positioning map description
-- Competitive threats and differentiation opportunities
+## Slide 8: Pain Points & Market Gaps
+Generate: top pain points from discovery, severity, current workarounds and their limitations, unmet needs.
 
-## Slide 9: Industry Pain Points & Market Gaps
-- 8-10 documented pain points with real impact data
-- Gap analysis showing unmet needs
-- Cross-reference with client-specific challenges
+## Slide 9: Stakeholder Impact Analysis
+Generate: key personas affected, their goals and friction points, current vs. desired state, success criteria per persona.
 
-## Slide 10: Stakeholder Impact Analysis
-- Personas affected with detailed pain descriptions
-- Frequency and severity assessment
-- Current workaround costs (quantified with real benchmarks)
-- 8-10 persona-impact bullets
+## Slide 10: Selected Opportunity — {opportunity.get('title', 'Opportunity')}
+Generate: opportunity description, why selected, value drivers and business case, KPIs with target improvements, why now, dependencies.
 
-## Slide 11: Opportunity Analysis — Selected Opportunity
-- Deep dive into the selected opportunity
-- Value drivers and business case
-- KPIs with current baselines and target improvements (real benchmarks)
-- Why-now justification with market timing evidence
-- 10-12 detailed bullets
+## Slide 11: Alternative Opportunities Considered
+Generate: other opportunity areas evaluated, trade-offs, rationale for selecting the recommended opportunity, future roadmap potential.
 
-## Slide 12: Alternative Opportunities Considered
-- Brief overview of other opportunity areas evaluated
-- Why the selected opportunity was chosen
-- 6-8 bullets
+## Slide 12: Proposed Solution — {archetype.get('title', 'Solution')}
+Generate: solution overview and value proposition, how it addresses the root problem, design principles, technology enablers, implementation complexity.
 
-## Slide 13: Solution Architecture Overview
-- The selected solution archetype: what it is, how it works
-- Core approach and differentiation
-- Technology stack and integration points
-- 10-12 bullets
+## Slide 13: User Experience & Workflows
+Generate: primary user journeys enabled, before vs. after workflow comparison, pain points eliminated, key UX principles.
 
-## Slide 14: Solution — User Experience & Workflows
-- Key user journeys and interaction patterns
-- Screen/module descriptions
-- Persona-specific workflows
-- 8-10 bullets
+## Slide 14: Technical Architecture
+Generate: system architecture overview, key components, data flow and integration patterns, security and compliance considerations, scalability design.
 
-## Slide 15: Solution — Technical Architecture
-- System architecture components
-- Data flow and integration patterns
-- API strategy and third-party integrations
-- Security and compliance considerations
-- 8-10 bullets
+## Slide 15: Feature Set
+{feature_list if feature_list else '- Core features to be defined during detailed scoping'}
+Generate: acceptance criteria approach, feature dependencies, prioritization rationale."""
 
-## Slide 16: Feature Set — Must Have (Priority 1)
-- All Must-priority features with full descriptions
-- User stories and acceptance criteria for each
-- Success metrics for each feature
-- 8-12 bullets
+    # -----------------------------------------------------------------------
+    # Part 2 — Slides 16–28 (roadmap, ROI, risk, next steps)
+    # -----------------------------------------------------------------------
+    prompt_part2 = f"""{context_block}
 
-## Slide 17: Feature Set — Should Have & Could Have
-- Should/Could-priority features with descriptions
-- Strategic value of each
-- 6-10 bullets
+---
 
-## Slide 18: Feature Dependency & Integration Map
-- How features relate to each other
-- Integration points and data dependencies
-- Build sequence rationale
-- 6-8 bullets
+Generate the following 13 slides. Each slide must have 4-6 specific bullet points drawn from the context above.
 
-## Slide 19: Value Drivers & ROI Analysis
-- Detailed ROI calculation framework
-- Expected business impact with REAL industry benchmarks
-- Revenue impact, cost savings, efficiency gains — all with verifiable numbers
-- Payback period estimates based on real case studies
-- 10-12 bullets
+## Slide 16: Value Drivers & ROI Framework
+Generate: primary value levers (efficiency, revenue, quality, risk reduction), ROI approach and key assumptions, expected operational KPI impact, cost savings and productivity improvement, payback period estimate.
 
-## Slide 20: Success Metrics & KPI Dashboard
-- Complete KPI framework with baselines and targets
-- Measurement methodology
-- Reporting cadence and governance
-- 8-10 bullets
+## Slide 17: Success Metrics & KPI Framework
+Generate: complete KPI list with baseline and target values for — {', '.join(opportunity.get('kpis', ['key metrics']))}; measurement methodology, reporting cadence, and governance model.
 
-## Slide 21: User Personas & Journey Maps
-- Detailed persona profiles (3-5 personas)
-- Current vs. future state journey for each
-- Pain points resolved and value delivered
-- 10-12 bullets
+Feature Success Metrics: {feature_metrics}
 
-## Slide 22: Data Strategy & Analytics
-- Data sources required
-- Analytics capabilities and insights
-- ML/AI models and their business value
-- Data governance considerations
-- 8-10 bullets
+## Slide 18: Implementation Roadmap — Phase 1: Foundation (0–3 months)
+Generate: key deliverables, team required, infrastructure setup, quick wins, risks for this phase.
 
-## Slide 23: Implementation Roadmap — Phase 1: Quick Wins (0-3 months)
-- Specific deliverables and milestones
-- Team composition and effort estimates
-- Expected outcomes with metrics
-- 8-10 bullets
+## Slide 19: Implementation Roadmap — Phase 2: Core Build (3–6 months)
+Generate: core feature development milestones, UAT and feedback loops, training activities, governance checkpoints.
 
-## Slide 24: Implementation Roadmap — Phase 2: Foundation (3-6 months)
-- Core platform buildout details
-- Integration milestones
-- Training and change management
-- 8-10 bullets
+## Slide 20: Implementation Roadmap — Phase 3: Scale & Optimize (6–12 months)
+Generate: advanced feature rollout, scale-out plan, continuous improvement framework, long-term operational model.
 
-## Slide 25: Implementation Roadmap — Phase 3: Scale & Optimize (6-12 months)
-- Advanced features and optimizations
-- Scale-out plan
-- Continuous improvement framework
-- 8-10 bullets
+## Slide 21: Resource & Team Requirements
+Generate: recommended team structure and roles, effort estimates by phase, required skills, vendor/partner considerations.
 
-## Slide 26: Resource Requirements & Team Structure
-- Team composition (roles, FTE estimates)
-- Skill requirements
-- Training and onboarding plan
-- 6-8 bullets
+## Slide 22: Investment Overview
+Generate: estimated cost ranges by phase (use industry benchmarks for {intake_data.get('industry', 'the sector')}), infrastructure and licensing considerations, total cost of ownership framework, investment vs. expected value return.
 
-## Slide 27: Investment & Budget Guidance
-- High-level cost ranges for each phase (use real industry benchmarks for similar implementations)
-- Infrastructure costs, licensing, and operational expenses
-- Total cost of ownership (TCO) framework
-- 6-8 bullets
+## Slide 23: Risk Assessment & Mitigation
+Generate: top 5 risks (technical, organizational, market) with probability/impact, mitigation strategies for each, monitoring approach.
 
-## Slide 28: Risk Assessment & Mitigation
-- 8-10 identified risks with probability and impact
-- Mitigation strategies for each
-- Contingency plans
+## Slide 24: Change Management & Adoption
+Generate: stakeholder communication plan, training strategy, adoption milestones, feedback loops and continuous improvement process.
 
-## Slide 29: Change Management & Adoption Strategy
-- Stakeholder communication plan
-- Training approach
-- Adoption metrics and targets
-- 6-8 bullets
+## Slide 25: Prototype & Proof of Concept Recommendations
+Generate: what to build first, POC success criteria, timeline and resource requirements, how learnings will inform the full build.
 
-## Slide 30: Prototype & POC Recommendations
-- What to build first as proof of concept
-- POC success criteria
-- Timeline and resources needed
-- How to use the generated builder prompts
-- 6-8 bullets
+## Slide 26: Next Steps & Call to Action
+Generate: immediate actions for next two weeks (with owners), decisions requiring stakeholder alignment, dependencies to resolve, recommended kick-off structure.
 
-## Slide 31: Next Steps & Call to Action
-- 8-10 concrete next steps with owners, timelines, and dependencies
-- Decision points and governance structure
-- Immediate actions (next 2 weeks)
+## Slide 27: Appendix — Research References
+Generate: summary of research findings and data sources, industry frameworks referenced, methodology notes from: {research[:500]}
 
-## Slide 32: Appendix A — Research References
-- Complete list of ALL sources cited throughout the report
-- Organized by category (market reports, case studies, analyst publications)
+## Slide 28: Appendix — Full Feature Specifications
+{feature_list}
+Feature User Stories: {feature_stories}
+Generate: complete feature list with acceptance criteria, technical notes, prioritization rationale."""
 
-## Slide 33: Appendix B — Detailed Feature Specifications
-- Full feature list with all user stories and success metrics
+    # -----------------------------------------------------------------------
+    # Generate both batches concurrently
+    # -----------------------------------------------------------------------
+    refusal_keywords = [
+        "i'm sorry", "i cannot", "i can't", "i am unable", "i'm unable",
+        "too long", "too lengthy", "report of that length",
+    ]
 
-## Slide 34: Appendix C — Glossary & Definitions
-- Key terms and definitions used in the report
+    def _is_refusal(text: str) -> bool:
+        sample = text.lower()[:300]
+        return any(k in sample for k in refusal_keywords)
 
-Format as markdown with ## for slide titles, ### for sub-sections, and - for bullets.
-REMINDER: 5,000-8,000 words minimum. Be EXHAUSTIVE. Include [SPEAKER NOTES: ...] for every content slide."""
-
-    content = await _async_llm_direct(
-        prompt,
-        "You are a management consultant and presentation expert. "
-        "You MUST use ONLY real, verifiable data and statistics from actual sources. "
-        "This is a COMPREHENSIVE final report — be extremely thorough. "
-        "Target 5,000-8,000 words minimum.",
-        max_tokens=16000,
+    part1, part2 = await asyncio.gather(
+        _async_llm_direct(prompt_part1, slide_system, max_tokens=6000),
+        _async_llm_direct(prompt_part2, slide_system, max_tokens=6000),
     )
+
+    if _is_refusal(part1) or _is_refusal(part2):
+        logger.warning("LLM refused a slide-content batch; falling back to single short prompt")
+        fallback_prompt = f"""Write an executive presentation for a product discovery engagement.
+
+Client: {intake_data.get('clientName', '')} | Industry: {intake_data.get('industry', '')}
+Business Function: {intake_data.get('businessFunction', '')}
+Problem: {intake_data.get('problemKeywords', '')}
+Opportunity: {opportunity.get('title', '')}
+Solution: {archetype.get('title', '')}
+
+Write 12 slides covering: executive summary, current state, problem, market context, opportunity, solution, features, roadmap (3 phases), ROI, risks, next steps, appendix.
+Use ## for slide titles and - for bullet points. 4-5 bullets per slide."""
+        content = await _async_llm_direct(fallback_prompt, slide_system, max_tokens=5000)
+    else:
+        content = part1.rstrip() + "\n\n" + part2.lstrip()
+
     return content
 
 

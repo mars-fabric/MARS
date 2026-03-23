@@ -17,7 +17,7 @@ import type {
 // Backend has CORS "*" so browser can call it directly, same as test scripts.
 // ---------------------------------------------------------------------------
 function getBackendUrl(endpoint: string): string {
-  const base = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:6969').replace(/\/$/, '')
+  const base = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '')
   return `${base}${endpoint}`
 }
 
