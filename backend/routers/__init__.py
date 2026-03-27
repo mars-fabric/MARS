@@ -21,6 +21,7 @@ from routers.sessions import router as sessions_router
 from routers.pda import router as pda_router
 from routers.deepresearch import router as deepresearch_router
 from routers.newspulse import router as newspulse_router
+from routers.releasenotes import router as releasenotes_router
 
 
 def register_routers(app):
@@ -40,6 +41,7 @@ def register_routers(app):
     app.include_router(nodes_router)
     app.include_router(pda_router)  # Product Discovery Assistant
     app.include_router(newspulse_router)  # Industry News & Sentiment Pulse
+    app.include_router(releasenotes_router)  # Release Notes Generator
 
 
 __all__ = [
@@ -58,4 +60,5 @@ __all__ = [
     "sessions_router",
     "pda_router",
     "deepresearch_router",
+    "releasenotes_router",
 ]

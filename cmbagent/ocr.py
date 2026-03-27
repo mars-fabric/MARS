@@ -17,7 +17,7 @@ import glob
 logger = logging.getLogger(__name__)
 
 # Mistral AI imports
-from mistralai.client import Mistral
+from mistralai import Mistral
 from mistralai.extra import response_format_from_pydantic_model
 
 

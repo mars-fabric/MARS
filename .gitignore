@@ -106,3 +106,7 @@ venv
 .env
 .claude*
 .env.local
+
+# Generated files
+Release_Notes_Generator.pptx
+generate_pptx.py

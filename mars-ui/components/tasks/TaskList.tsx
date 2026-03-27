@@ -48,7 +48,7 @@ const TASKS: TaskData[] = [
   {
     id: 'release-notes',
     name: 'Release Notes',
-    description: 'Automatically generate release notes from Git history',
+    description: 'Compare two Git branches and generate release documentation with differences, impact analysis, and more',
     mode: 'one-shot',
     status: 'active',
     lastRun: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),

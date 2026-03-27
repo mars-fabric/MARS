@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     logger.info("Starting CMBAgent Backend Server")
-    logger.info("Server: http://localhost:8000 | WebSocket: ws://localhost:8000/ws/{task_id} | Docs: http://localhost:8000/docs")
+    port = int(os.getenv("PORT", 8000))
+    logger.info("Server: http://localhost:%d | WebSocket: ws://localhost:%d/ws/{task_id} | Docs: http://localhost:%d/docs", port, port, port)
 
     # Get log directory from environment or use default
     work_dir = os.getenv("CMBAGENT_DEFAULT_WORK_DIR", "~/Desktop/cmbdir")
@@ -67,7 +68,7 @@ if __name__ == "__main__":
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
+        port=port,
         reload=enable_reload,
         reload_excludes=reload_excludes if enable_reload else None,
         log_level="info",
