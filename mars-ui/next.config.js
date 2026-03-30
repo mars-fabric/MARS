@@ -2,16 +2,14 @@
 const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const nextConfig = {
+  // Allow cross-origin dev requests from the server's IP
+  allowedDevOrigins: ['100.88.49.58'],
+
   // Disable strict mode to prevent double-render in dev (a common lag source)
   reactStrictMode: false,
 
   // Disable the "X-Powered-By" header
   poweredByHeader: false,
-
-  // Suppress build-time ESLint errors (still lint separately)
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
 
   async rewrites() {
     return [
