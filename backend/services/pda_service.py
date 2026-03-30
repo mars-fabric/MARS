@@ -150,6 +150,9 @@ def _call_llm_direct(
     Call LLM directly using cmbagent's create_openai_client().
     This uses the same provider auto-detection (OpenAI/Azure/etc.)
     that cmbagent uses internally.  Retries on transient failures.
+
+    Handles both older models (max_tokens) and newer models
+    (max_completion_tokens) automatically.
     """
     from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
 
@@ -162,22 +165,44 @@ def _call_llm_direct(
     messages.append({"role": "user", "content": prompt})
 
     last_err: Optional[Exception] = None
+    # Track whether the model needs max_completion_tokens instead of max_tokens
+    use_completion_tokens = _USE_MAX_COMPLETION_TOKENS
+
     for attempt in range(1, _MAX_LLM_RETRIES + 1):
         try:
             logger.info(
                 "PDA LLM call [attempt %d/%d]: model=%s, prompt_len=%d",
                 attempt, _MAX_LLM_RETRIES, model, len(prompt),
             )
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-            )
+            # Build kwargs — newer models (o1, o3, gpt-4o latest) require
+            # max_completion_tokens instead of max_tokens
+            kwargs: Dict[str, Any] = {
+                "model": model,
+                "messages": messages,
+            }
+            if use_completion_tokens:
+                kwargs["max_completion_tokens"] = max_tokens
+            else:
+                kwargs["temperature"] = temperature
+                kwargs["max_tokens"] = max_tokens
+
+            response = client.chat.completions.create(**kwargs)
             content = response.choices[0].message.content or ""
             logger.info("PDA LLM response: len=%d", len(content))
             return content
         except Exception as e:
+            err_str = str(e)
+            # Auto-detect the parameter mismatch and switch
+            if "max_tokens" in err_str and "max_completion_tokens" in err_str and not use_completion_tokens:
+                logger.info("Model requires max_completion_tokens — retrying with corrected param")
+                use_completion_tokens = True
+                _set_use_max_completion_tokens(True)
+                continue  # retry immediately, don't count this attempt
+            if "max_completion_tokens" in err_str and "max_tokens" in err_str and use_completion_tokens:
+                logger.info("Model requires max_tokens — retrying with corrected param")
+                use_completion_tokens = False
+                _set_use_max_completion_tokens(False)
+                continue
             last_err = e
             logger.warning("PDA LLM attempt %d failed: %s", attempt, e)
             if attempt < _MAX_LLM_RETRIES:
@@ -185,6 +210,15 @@ def _call_llm_direct(
                 time.sleep(1 * attempt)  # simple back-off
 
     raise RuntimeError(f"PDA LLM call failed after {_MAX_LLM_RETRIES} attempts: {last_err}")
+
+
+# Module-level flag to remember which token param the model accepts.
+# Auto-detected on the first error, then cached for subsequent calls.
+_USE_MAX_COMPLETION_TOKENS = True  # default to newer param (max_completion_tokens)
+
+def _set_use_max_completion_tokens(val: bool):
+    global _USE_MAX_COMPLETION_TOKENS
+    _USE_MAX_COMPLETION_TOKENS = val
 
 
 def _call_cmbagent_researcher(task: str, work_dir: Optional[str] = None) -> Optional[str]:

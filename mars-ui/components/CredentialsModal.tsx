@@ -32,10 +32,10 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
     openai_key: '',
     anthropic_key: '',
     vertex_json: '',
-    azure_api_key: '',
-    azure_endpoint: '',
-    azure_deployment: '',
-    azure_api_version: ''
+    azure_openai_key: '',
+    azure_openai_endpoint: '',
+    azure_openai_deployment: '',
+    azure_openai_api_version: ''
   });
   
   const [showKeys, setShowKeys] = useState({
@@ -143,7 +143,7 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
   };
 
   const hasCredentialsToTest = formData.openai_key || formData.anthropic_key || formData.vertex_json || 
-    (formData.azure_api_key && formData.azure_endpoint);
+    (formData.azure_openai_key && formData.azure_openai_endpoint);
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -304,8 +304,8 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
               <div className="relative">
                 <input
                   type={showKeys.azure ? 'text' : 'password'}
-                  value={formData.azure_api_key}
-                  onChange={(e) => handleInputChange('azure_api_key', e.target.value)}
+                  value={formData.azure_openai_key}
+                  onChange={(e) => handleInputChange('azure_openai_key', e.target.value)}
                   placeholder="Your Azure OpenAI API key"
                   className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
@@ -325,8 +325,8 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
               </label>
               <input
                 type="text"
-                value={formData.azure_endpoint}
-                onChange={(e) => handleInputChange('azure_endpoint', e.target.value)}
+                value={formData.azure_openai_endpoint}
+                onChange={(e) => handleInputChange('azure_openai_endpoint', e.target.value)}
                 placeholder="https://your-resource.openai.azure.com/"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
@@ -338,8 +338,8 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
               </label>
               <input
                 type="text"
-                value={formData.azure_deployment}
-                onChange={(e) => handleInputChange('azure_deployment', e.target.value)}
+                value={formData.azure_openai_deployment}
+                onChange={(e) => handleInputChange('azure_openai_deployment', e.target.value)}
                 placeholder="gpt-4o"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
@@ -351,8 +351,8 @@ export const CredentialsModal: React.FC<CredentialsModalProps> = ({
               </label>
               <input
                 type="text"
-                value={formData.azure_api_version}
-                onChange={(e) => handleInputChange('azure_api_version', e.target.value)}
+                value={formData.azure_openai_api_version}
+                onChange={(e) => handleInputChange('azure_openai_api_version', e.target.value)}
                 placeholder="2024-12-01-preview"
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />

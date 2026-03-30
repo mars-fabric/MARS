@@ -61,26 +61,28 @@ export const useCredentials = () => {
 
     const openaiValid = credentialStatus.results.openai?.status === 'valid';
     const azureValid = credentialStatus.results.azure_openai?.status === 'valid';
+    const azureFallbackValid = credentialStatus.results.azure_openai_fallback?.status === 'valid';
     const anthropicValid = credentialStatus.results.anthropic?.status === 'valid';
     const vertexValid = credentialStatus.results.vertex?.status === 'valid';
 
-    // Can submit task if either OpenAI or Azure OpenAI is valid
+    // Can submit task if either OpenAI or Azure OpenAI (primary or fallback-promoted) is valid
     const canSubmitTask = openaiValid || azureValid;
 
     let statusMessage = '';
     if (!canSubmitTask) {
-      statusMessage = 'OpenAI or Azure OpenAI API key required to submit tasks';
+      statusMessage = 'No LLM provider available — configure OpenAI or Azure OpenAI API key';
     } else if ((openaiValid || azureValid) && anthropicValid && vertexValid) {
-      statusMessage = 'All credentials valid';
+      const provider = openaiValid ? 'OpenAI' : 'Azure OpenAI';
+      statusMessage = `All credentials valid (active: ${provider})`;
     } else {
+      const provider = openaiValid ? 'OpenAI' : 'Azure OpenAI';
       const missing = [];
-      if (!openaiValid && !azureValid) missing.push('OpenAI');
       if (!anthropicValid) missing.push('Anthropic');
       if (!vertexValid) missing.push('Vertex AI');
       if (missing.length > 0) {
-        statusMessage = `Limited functionality: ${missing.join(' and ')} not configured`;
+        statusMessage = `${provider} active — ${missing.join(' and ')} not configured`;
       } else {
-        statusMessage = 'Ready';
+        statusMessage = `Ready (${provider})`;
       }
     }
 

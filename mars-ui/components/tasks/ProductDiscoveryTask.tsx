@@ -215,7 +215,7 @@ function Spinner({ label }: { label: string }) {
 }
 
 // ─── TimerLoader — countdown timer for long-running steps ────────────────────
-const STEP_TIMEOUT_SECONDS = 10 * 60 // 10 minutes
+const STEP_TIMEOUT_SECONDS = 20 * 60 // 20 minutes
 
 function TimerLoader({ label, onTimeout }: { label: string; onTimeout?: () => void }) {
   const [elapsed, setElapsed] = useState(0)
@@ -272,7 +272,7 @@ function TimerLoader({ label, onTimeout }: { label: string; onTimeout?: () => vo
         className="text-sm mt-3"
         style={{ color: 'var(--mars-color-text-secondary)' }}
       >
-        This step typically takes 2–10 minutes. Please wait…
+        This step typically takes 2–20 minutes. Please wait…
       </p>
     </div>
   )
@@ -792,6 +792,7 @@ function IntakeStep({
   const [suggestedFuncs, setSuggestedFuncs] = useState<string[]>([])
   const [suggestedDiscoveryTypes, setSuggestedDiscoveryTypes] = useState<string[]>([])
   const [autoFilled, setAutoFilled] = useState(false)
+  const [detectError, setDetectError] = useState<string | null>(null)
   const [customBusinessFunc, setCustomBusinessFunc] = useState('')
   const [showCustomFunc, setShowCustomFunc] = useState(false)
   const [customDiscoveryType, setCustomDiscoveryType] = useState('')
@@ -808,45 +809,57 @@ function IntakeStep({
     [onUpdate],
   )
 
+  // Shared detection logic
+  const detectClientDetails = useCallback(async (clientName: string) => {
+    if (!clientName || clientName.length < 2) return
+    setLoadingClient(true)
+    setDetectError(null)
+    try {
+      const details = await getClientDetails(clientName)
+      const patch: Partial<IntakeFormData> = {}
+      // Auto-fill all fields — user can always edit
+      if (details.industry) patch.industry = details.industry
+      if (details.subIndustry) patch.subIndustry = details.subIndustry
+      if (details.clientContext) patch.clientContext = details.clientContext
+      if (details.problemKeywords) patch.problemKeywords = details.problemKeywords
+      // Set first suggested business function as default
+      if (details.businessFunctions.length > 0) {
+        patch.businessFunction = details.businessFunctions[0]
+      }
+      // Set first suggested discovery type as default
+      if (details.suggestedDiscoveryTypes?.length > 0) {
+        patch.discoveryType = details.suggestedDiscoveryTypes[0]
+      }
+
+      if (Object.keys(patch).length) {
+        update(patch)
+        setAutoFilled(true)
+        setDetectError(null)
+        notify('All fields auto-populated from company data — review & edit as needed')
+      } else {
+        setDetectError('No suggestions returned — try a different company name or fill fields manually.')
+      }
+      if (details.businessFunctions.length)
+        setSuggestedFuncs(details.suggestedBusinessFunctions?.length 
+          ? Array.from(new Set([...details.businessFunctions, ...details.suggestedBusinessFunctions]))
+          : details.businessFunctions)
+      if (details.suggestedDiscoveryTypes?.length)
+        setSuggestedDiscoveryTypes(details.suggestedDiscoveryTypes)
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to auto-detect client details'
+      setDetectError(msg)
+      notify(msg, 'error')
+    } finally {
+      setLoadingClient(false)
+    }
+  }, [update])
+
   // auto-detect ALL client details when client name is entered
   useEffect(() => {
-    if (!form.clientName || form.clientName.length < 3) return
-    const timeout = setTimeout(async () => {
-      setLoadingClient(true)
-      try {
-        const details = await getClientDetails(form.clientName)
-        const patch: Partial<IntakeFormData> = {}
-        // Auto-fill all fields — user can always edit
-        if (details.industry) patch.industry = details.industry
-        if (details.subIndustry) patch.subIndustry = details.subIndustry
-        if (details.clientContext) patch.clientContext = details.clientContext
-        if (details.problemKeywords) patch.problemKeywords = details.problemKeywords
-        // Set first suggested business function as default
-        if (details.businessFunctions.length > 0) {
-          patch.businessFunction = details.businessFunctions[0]
-        }
-        // Set first suggested discovery type as default
-        if (details.suggestedDiscoveryTypes?.length > 0) {
-          patch.discoveryType = details.suggestedDiscoveryTypes[0]
-        }
-
-        if (Object.keys(patch).length) {
-          update(patch)
-          setAutoFilled(true)
-          notify('All fields auto-populated from company data — review & edit as needed')
-        }
-        if (details.businessFunctions.length)
-          setSuggestedFuncs(details.suggestedBusinessFunctions?.length 
-            ? Array.from(new Set([...details.businessFunctions, ...details.suggestedBusinessFunctions]))
-            : details.businessFunctions)
-        if (details.suggestedDiscoveryTypes?.length)
-          setSuggestedDiscoveryTypes(details.suggestedDiscoveryTypes)
-      } catch {
-        /* ignore */
-      } finally {
-        setLoadingClient(false)
-      }
-    }, 1000)
+    if (!form.clientName || form.clientName.length < 2) return
+    const timeout = setTimeout(() => {
+      detectClientDetails(form.clientName)
+    }, 1500)
     return () => clearTimeout(timeout)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.clientName])
@@ -907,26 +920,44 @@ function IntakeStep({
         <div className="space-y-5">
           {/* Client Name */}
           <Field label="Client Name *">
-            <div className="relative">
-              <input
-                className="w-full h-9 px-3 border rounded-md text-sm"
-                style={inputStyle}
-                value={form.clientName}
-                onChange={(e) => update({ clientName: e.target.value })}
-                placeholder="Enter client name"
-              />
-              {loadingClient && (
-                <Loader2
-                  className="absolute right-3 top-2 w-4 h-4 animate-spin"
-                  style={{ color: 'var(--mars-color-text-tertiary)' }}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <input
+                  className="w-full h-9 px-3 border rounded-md text-sm"
+                  style={inputStyle}
+                  value={form.clientName}
+                  onChange={(e) => update({ clientName: e.target.value })}
+                  placeholder="Enter client name"
                 />
-              )}
+                {loadingClient && (
+                  <Loader2
+                    className="absolute right-3 top-2 w-4 h-4 animate-spin"
+                    style={{ color: 'var(--mars-color-text-tertiary)' }}
+                  />
+                )}
+              </div>
+              <button
+                className="flex items-center gap-1 px-3 h-9 text-sm font-medium rounded-md text-white disabled:opacity-50"
+                style={{ backgroundColor: 'var(--mars-color-primary)' }}
+                disabled={loadingClient || !form.clientName || form.clientName.length < 2}
+                onClick={() => detectClientDetails(form.clientName)}
+              >
+                <Sparkles className="w-4 h-4" />
+                {loadingClient ? 'Detecting…' : 'Auto-Detect'}
+              </button>
             </div>
-            {autoFilled && (
+            {autoFilled && !detectError && (
               <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-md text-sm"
                 style={{ backgroundColor: 'var(--mars-color-primary-subtle)', color: 'var(--mars-color-primary-text)' }}>
                 <Sparkles className="w-4 h-4" />
                 <span>All fields auto-populated with real company data — review and edit as needed</span>
+              </div>
+            )}
+            {detectError && (
+              <div className="flex items-center gap-2 mt-2 px-3 py-2 rounded-md text-sm"
+                style={{ backgroundColor: '#fef2f2', color: '#dc2626' }}>
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                <span>{detectError}</span>
               </div>
             )}
           </Field>
@@ -1248,7 +1279,7 @@ function ResearchStep({
         label="Generating Research Summary"
         onTimeout={() => {
           setLoading(false)
-          setError('Request timed out after 10 minutes. Please retry.')
+          setError('Request timed out after 20 minutes. Please retry.')
         }}
       />
     )
@@ -1368,16 +1399,19 @@ function ProblemStep({
   const [data, setData] = useState<ProblemDefinition | null>(
     initialData ?? null,
   )
+  const [error, setError] = useState<string | null>(null)
   const calledRef = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const result = await generateProblemDefinition(intakeData, researchSummary)
       setData(result)
       onComplete(result)
       notify('Problem definition generated')
-    } catch {
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate problem definition')
       notify('Failed to generate problem definition', 'error')
     } finally {
       setLoading(false)
@@ -1392,8 +1426,15 @@ function ProblemStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  if (loading) return <Spinner label="Defining the Problem" />
-  if (!data) return null
+  if (loading) return <TimerLoader label="Defining the Problem" onTimeout={() => { setLoading(false); setError('Request timed out. Please retry.') }} />
+  if (error || !data) return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500" />
+      <h3 className="text-lg font-semibold" style={{ color: 'var(--mars-color-text)' }}>Problem Definition Failed</h3>
+      <p className="text-sm text-center max-w-md" style={{ color: 'var(--mars-color-text-secondary)' }}>{error || 'No data returned.'}</p>
+      <Button onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Retry</Button>
+    </div>
+  )
 
   const sections: {
     key: keyof ProblemDefinition
@@ -1520,19 +1561,27 @@ function OpportunityStep({
     initialData ?? [],
   )
   const [selected, setSelected] = useState<string | null>(selectedId ?? null)
+  const [error, setError] = useState<string | null>(null)
   const calledRef = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
+      // Send full problem definition JSON for richer context
       const text =
         typeof problemDefinition === 'string'
           ? problemDefinition
-          : (problemDefinition as any).problemStatement || JSON.stringify(problemDefinition)
+          : JSON.stringify(problemDefinition)
       const result = await generateOpportunities(intakeData, text)
-      setOpportunities(result)
-      notify('Opportunity areas generated')
-    } catch {
+      if (!result.length) {
+        setError('No opportunities returned. Please retry.')
+      } else {
+        setOpportunities(result)
+        notify('Opportunity areas generated')
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate opportunities')
       notify('Failed to generate opportunities', 'error')
     } finally {
       setLoading(false)
@@ -1552,7 +1601,15 @@ function OpportunityStep({
     onComplete(opportunities, id)
   }
 
-  if (loading) return <Spinner label="Identifying Opportunities" />
+  if (loading) return <TimerLoader label="Identifying Opportunities" onTimeout={() => { setLoading(false); setError('Request timed out. Please retry.') }} />
+  if (error) return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500" />
+      <h3 className="text-lg font-semibold" style={{ color: 'var(--mars-color-text)' }}>Opportunity Generation Failed</h3>
+      <p className="text-sm text-center max-w-md" style={{ color: 'var(--mars-color-text-secondary)' }}>{error}</p>
+      <Button onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Retry</Button>
+    </div>
+  )
 
   const valueIcons: Record<string, React.ElementType> = {
     Revenue: TrendingUp,
@@ -1694,15 +1751,22 @@ function SolutionStep({
     initialData ?? [],
   )
   const [selected, setSelected] = useState<string | null>(selectedId ?? null)
+  const [error, setError] = useState<string | null>(null)
   const calledRef = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const result = await generateSolutionArchetypes(opportunity, intakeData)
-      setArchetypes(result)
-      notify('Solution archetypes generated')
-    } catch {
+      if (!result.length) {
+        setError('No solution archetypes returned. Please retry.')
+      } else {
+        setArchetypes(result)
+        notify('Solution archetypes generated')
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate archetypes')
       notify('Failed to generate archetypes', 'error')
     } finally {
       setLoading(false)
@@ -1722,7 +1786,15 @@ function SolutionStep({
     onComplete(archetypes, id)
   }
 
-  if (loading) return <Spinner label="Creating Solution Archetypes" />
+  if (loading) return <TimerLoader label="Creating Solution Archetypes" onTimeout={() => { setLoading(false); setError('Request timed out. Please retry.') }} />
+  if (error) return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500" />
+      <h3 className="text-lg font-semibold" style={{ color: 'var(--mars-color-text)' }}>Solution Generation Failed</h3>
+      <p className="text-sm text-center max-w-md" style={{ color: 'var(--mars-color-text-secondary)' }}>{error}</p>
+      <Button onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Retry</Button>
+    </div>
+  )
 
   return (
     <div className="max-w-5xl mx-auto py-8 px-4 space-y-6">
@@ -1854,6 +1926,7 @@ function FeatureStep({
   const [features, setFeatures] = useState<Feature[]>(initialData ?? [])
   const [showAdd, setShowAdd] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [error, setError] = useState<string | null>(null)
   const calledRef = useRef(false)
   const [newFeat, setNewFeat] = useState({
     name: '',
@@ -1867,12 +1940,18 @@ function FeatureStep({
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const result = await generateFeatures(archetype, opportunity, intakeData)
-      setFeatures(result)
-      onComplete(result)
-      notify('Feature set generated')
-    } catch {
+      if (!result.length) {
+        setError('No features returned. Please retry.')
+      } else {
+        setFeatures(result)
+        onComplete(result)
+        notify('Feature set generated')
+      }
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate features')
       notify('Failed to generate features', 'error')
     } finally {
       setLoading(false)
@@ -1930,7 +2009,15 @@ function FeatureStep({
       return next
     })
 
-  if (loading) return <Spinner label="Building Feature Set" />
+  if (loading) return <TimerLoader label="Building Feature Set" onTimeout={() => { setLoading(false); setError('Request timed out. Please retry.') }} />
+  if (error && features.length === 0) return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500" />
+      <h3 className="text-lg font-semibold" style={{ color: 'var(--mars-color-text)' }}>Feature Generation Failed</h3>
+      <p className="text-sm text-center max-w-md" style={{ color: 'var(--mars-color-text-secondary)' }}>{error}</p>
+      <Button onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Retry</Button>
+    </div>
+  )
 
   const byBucket = features.reduce(
     (acc, f) => {
@@ -2190,11 +2277,13 @@ function PromptStep({
     'lovable',
   )
   const [copied, setCopied] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
   const selectedFeatures = features.filter((f) => f.selected)
   const calledRef = useRef(false)
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const result = await generatePrompts(
         intakeData,
@@ -2205,7 +2294,8 @@ function PromptStep({
       setPrompts(result)
       onComplete(result)
       notify('Prompts generated')
-    } catch {
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate prompts')
       notify('Failed to generate prompts', 'error')
     } finally {
       setLoading(false)
@@ -2232,7 +2322,15 @@ function PromptStep({
     }
   }
 
-  if (loading) return <Spinner label="Generating Prompts" />
+  if (loading) return <TimerLoader label="Generating Prompts" onTimeout={() => { setLoading(false); setError('Request timed out. Please retry.') }} />
+  if (error) return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500" />
+      <h3 className="text-lg font-semibold" style={{ color: 'var(--mars-color-text)' }}>Prompt Generation Failed</h3>
+      <p className="text-sm text-center max-w-md" style={{ color: 'var(--mars-color-text-secondary)' }}>{error}</p>
+      <Button onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Retry</Button>
+    </div>
+  )
 
   const tabs: { key: 'lovable' | 'googleAI' | 'general'; label: string; desc: string }[] = [
     { key: 'lovable', label: 'Lovable', desc: "Optimized for Lovable's AI app builder" },
@@ -2358,6 +2456,7 @@ function SlideStep({
   const [content, setContent] = useState(initialData ?? '')
   const [slides, setSlides] = useState<SlideSection[]>([])
   const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const calledRef = useRef(false)
 
   const selectedFeatures = features.filter((f) => f.selected)
@@ -2386,13 +2485,14 @@ function SlideStep({
 
   const load = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const researchStr =
         typeof research === 'string' ? research : JSON.stringify(research)
       const problemStr =
         typeof problem === 'string'
           ? problem
-          : (problem as any).problemStatement || JSON.stringify(problem)
+          : JSON.stringify(problem)
       const result = await generateSlideContent(
         intakeData,
         researchStr,
@@ -2404,7 +2504,8 @@ function SlideStep({
       setContent(result)
       onComplete(result)
       notify('Slide content generated')
-    } catch {
+    } catch (err: any) {
+      setError(err?.message || 'Failed to generate slide content')
       notify('Failed to generate slide content', 'error')
     } finally {
       setLoading(false)
@@ -2431,7 +2532,15 @@ function SlideStep({
     }
   }
 
-  if (loading) return <Spinner label="Generating Slide Content" />
+  if (loading) return <TimerLoader label="Generating Slide Content" onTimeout={() => { setLoading(false); setError('Request timed out. Please retry.') }} />
+  if (error) return (
+    <div className="flex flex-col items-center justify-center py-20 space-y-4">
+      <AlertCircle className="w-12 h-12 text-red-500" />
+      <h3 className="text-lg font-semibold" style={{ color: 'var(--mars-color-text)' }}>Slide Generation Failed</h3>
+      <p className="text-sm text-center max-w-md" style={{ color: 'var(--mars-color-text-secondary)' }}>{error}</p>
+      <Button onClick={load}><RefreshCw className="w-4 h-4 mr-2" />Retry</Button>
+    </div>
+  )
 
   return (
     <div className="max-w-5xl mx-auto py-8 px-4 space-y-6">

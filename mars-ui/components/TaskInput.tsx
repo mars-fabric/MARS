@@ -505,26 +505,26 @@ Don't suggest to perform any calculations or analyses here. The only goal of thi
           )}
         </div>
 
-        {/* OpenAI Required Error - Main UI (Red Key) */}
+        {/* API Key Required Error - Main UI (Red Key) */}
         {(() => {
           const validation = getValidation();
           
-          // Only show warning if credentials have been loaded and OpenAI is invalid
+          // Only show warning if credentials have been loaded and no LLM provider (OpenAI or Azure) is valid
           const credentialsLoaded = credentialStatus !== null;
-          const shouldShow = showOpenAIError || (credentialsLoaded && !validation.canSubmitTask && !validation.openaiValid);
+          const shouldShow = showOpenAIError || (credentialsLoaded && !validation.canSubmitTask && !validation.openaiValid && !validation.azureValid);
           
           return shouldShow && (
             <div className="bg-red-900/50 border-2 border-red-500 rounded-lg p-4 text-sm animate-pulse">
               <div className="flex items-start gap-3">
                 <div className="text-red-400 text-2xl">🚨</div>
                 <div>
-                  <div className="text-red-200 font-bold mb-2 text-base">⚠️ OpenAI API Key Required!</div>
+                  <div className="text-red-200 font-bold mb-2 text-base">⚠️ API Key Required!</div>
                   <div className="text-red-200/90 text-sm leading-relaxed mb-3">
-                    You must provide at least a valid OpenAI API key to submit tasks.
+                    You must provide at least a valid OpenAI or Azure OpenAI API key to submit tasks.
                     <br />
                     <br />📝 <strong>How to fix:</strong>
                     <br />• Click the <strong>red key icon (🔑)</strong> in the top right
-                    <br />• Enter your OpenAI API key 
+                    <br />• Enter your OpenAI API key or Azure OpenAI credentials
                     <br />• Click "Save & Test" to validate
                   </div>
                   <button

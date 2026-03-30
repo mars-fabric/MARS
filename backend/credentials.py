@@ -238,7 +238,14 @@ async def test_vertex_credentials(service_account_json: str) -> CredentialTest:
 
 
 async def test_all_credentials() -> Dict[str, CredentialTest]:
-    """Test all available credentials from environment variables"""
+    """Test all available credentials from environment variables.
+    
+    Supports dynamic provider fallback:
+    - Tests OpenAI first
+    - Tests primary Azure OpenAI (AZURE_OPENAI_*)
+    - Tests fallback Azure OpenAI (AZURE_OPENAI_FALLBACK_*)
+    - If primary Azure fails but fallback succeeds, promotes fallback to active
+    """
     results = {}
     
     # Test OpenAI
@@ -252,7 +259,7 @@ async def test_all_credentials() -> Dict[str, CredentialTest]:
             message="OPENAI_API_KEY not set in environment"
         )
     
-    # Test Azure OpenAI
+    # Test Azure OpenAI (primary)
     azure_key = os.getenv('AZURE_OPENAI_API_KEY')
     azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT')
     if azure_key and azure_endpoint:
@@ -266,6 +273,35 @@ async def test_all_credentials() -> Dict[str, CredentialTest]:
             provider="azure_openai",
             status="not_configured",
             message="AZURE_OPENAI_API_KEY or AZURE_OPENAI_ENDPOINT not set"
+        )
+    
+    # Test Azure OpenAI (fallback)
+    fb_key = os.getenv('AZURE_OPENAI_FALLBACK_API_KEY')
+    fb_endpoint = os.getenv('AZURE_OPENAI_FALLBACK_ENDPOINT')
+    if fb_key and fb_endpoint:
+        fb_deployment = os.getenv('AZURE_OPENAI_FALLBACK_DEPLOYMENT', '')
+        fb_api_version = os.getenv('AZURE_OPENAI_FALLBACK_API_VERSION', '2024-12-01-preview')
+        results['azure_openai_fallback'] = await test_azure_openai_credentials(
+            fb_key, fb_endpoint, fb_deployment, fb_api_version
+        )
+        # Override provider name for clarity
+        results['azure_openai_fallback'].provider = "azure_openai_fallback"
+    else:
+        results['azure_openai_fallback'] = CredentialTest(
+            provider="azure_openai_fallback",
+            status="not_configured",
+            message="AZURE_OPENAI_FALLBACK_* not set (optional)"
+        )
+    
+    # Dynamic fallback: if primary Azure failed but fallback is valid, promote it
+    if (results['azure_openai'].status != 'valid' and 
+            results['azure_openai_fallback'].status == 'valid' and
+            fb_key and fb_endpoint):
+        _promote_azure_fallback(fb_key, fb_endpoint, fb_deployment, fb_api_version)
+        results['azure_openai'] = CredentialTest(
+            provider="azure_openai",
+            status="valid",
+            message=f"Using fallback Azure config ({fb_deployment or 'default'})"
         )
     
     # Test Anthropic
@@ -336,7 +372,7 @@ async def test_azure_openai_credentials(
         }
         data = {
             "messages": [{"role": "user", "content": "Hi"}],
-            "max_tokens": 1
+            "max_completion_tokens": 5
         }
 
         verify_ssl = os.getenv('AZURE_OPENAI_VERIFY_SSL', 'true').lower() != 'false'
@@ -348,6 +384,22 @@ async def test_azure_openai_credentials(
                         provider="azure_openai",
                         status="valid",
                         message="Azure OpenAI credentials are valid"
+                    )
+                elif response.status == 400:
+                    # 400 can mean max_tokens reached (credentials valid, just hit limit)
+                    # or a genuine bad request. Check the error message.
+                    error_text = await response.text()
+                    if 'max_tokens' in error_text or 'model output limit' in error_text or 'token' in error_text.lower():
+                        return CredentialTest(
+                            provider="azure_openai",
+                            status="valid",
+                            message="Azure OpenAI credentials are valid (token limit hit during test)"
+                        )
+                    return CredentialTest(
+                        provider="azure_openai",
+                        status="error",
+                        message="Azure OpenAI request error",
+                        error_details=f"HTTP 400: {error_text}"
                     )
                 elif response.status == 401:
                     return CredentialTest(
@@ -378,6 +430,32 @@ async def test_azure_openai_credentials(
             message="Error connecting to Azure OpenAI API",
             error_details=str(e)
         )
+
+
+def _promote_azure_fallback(fb_key: str, fb_endpoint: str, fb_deployment: str, fb_api_version: str):
+    """Promote fallback Azure credentials to primary env vars.
+    
+    Called when primary Azure fails but fallback succeeds, so that 
+    downstream code (llm_provider, cmbagent) uses the working config.
+    """
+    os.environ['AZURE_OPENAI_API_KEY'] = fb_key
+    os.environ['AZURE_OPENAI_ENDPOINT'] = fb_endpoint
+    if fb_deployment:
+        os.environ['AZURE_OPENAI_DEPLOYMENT'] = fb_deployment
+    if fb_api_version:
+        os.environ['AZURE_OPENAI_API_VERSION'] = fb_api_version
+    
+    # Also set OPENAI_API_KEY for tools that expect it (ChromaDB, etc.)
+    os.environ['OPENAI_API_KEY'] = fb_key
+    os.environ['OPENAI_API_TYPE'] = 'azure'
+    os.environ['OPENAI_API_BASE'] = fb_endpoint
+    
+    # Refresh LLM provider singleton if available
+    try:
+        from cmbagent.llm_provider import get_provider_config
+        get_provider_config().refresh()
+    except ImportError:
+        pass
 
 
 def store_credentials_in_env(credentials: CredentialStorage) -> Dict[str, str]:

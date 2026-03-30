@@ -69,6 +69,12 @@ class LLMProviderConfig:
         self.azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-12-01-preview")
         self.azure_verify_ssl = os.getenv("AZURE_OPENAI_VERIFY_SSL", "true").lower() != "false"
 
+        # Fallback Azure config
+        self.azure_fallback_api_key = os.getenv("AZURE_OPENAI_FALLBACK_API_KEY", "")
+        self.azure_fallback_endpoint = os.getenv("AZURE_OPENAI_FALLBACK_ENDPOINT", "")
+        self.azure_fallback_deployment = os.getenv("AZURE_OPENAI_FALLBACK_DEPLOYMENT", "")
+        self.azure_fallback_api_version = os.getenv("AZURE_OPENAI_FALLBACK_API_VERSION", "2024-12-01-preview")
+
         # Deployment map: JSON mapping deployment names to model names
         deployment_map_str = os.getenv("AZURE_OPENAI_DEPLOYMENT_MAP", "")
         self.azure_deployment_map: Dict[str, str] = {}
@@ -167,6 +173,7 @@ class LLMProviderConfig:
             "azure_deployment": self.azure_deployment if self.is_azure else None,
             "azure_api_version": self.effective_api_version if self.is_azure else None,
             "azure_verify_ssl": self.azure_verify_ssl if self.is_azure else None,
+            "has_azure_fallback": bool(self.azure_fallback_api_key and self.azure_fallback_endpoint),
             "has_openai_key": bool(self.openai_api_key),
             "has_azure_key": bool(self.azure_api_key),
             "has_anthropic_key": bool(self.anthropic_api_key),

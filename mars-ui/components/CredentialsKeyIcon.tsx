@@ -73,15 +73,17 @@ export const CredentialsKeyIcon: React.FC<CredentialsKeyIconProps> = ({
     if (!status) return 'text-gray-400';
     
     const openaiValid = status.results.openai?.status === 'valid';
+    const azureValid = status.results.azure_openai?.status === 'valid';
     const anthropicValid = status.results.anthropic?.status === 'valid';
     const vertexValid = status.results.vertex?.status === 'valid';
+    const hasLLMProvider = openaiValid || azureValid;
     
-    if (!openaiValid) {
-      return 'text-red-500'; // Red if OpenAI not valid
-    } else if (openaiValid && anthropicValid && vertexValid) {
+    if (!hasLLMProvider) {
+      return 'text-red-500'; // Red if no LLM provider valid
+    } else if (hasLLMProvider && anthropicValid && vertexValid) {
       return 'text-green-500'; // Green if all valid
     } else {
-      return 'text-orange-500'; // Orange if OpenAI valid but others missing
+      return 'text-orange-500'; // Orange if LLM valid but others missing
     }
   };
 
@@ -89,18 +91,21 @@ export const CredentialsKeyIcon: React.FC<CredentialsKeyIconProps> = ({
     if (!status) return 'Unable to check credential status';
     
     const openaiValid = status.results.openai?.status === 'valid';
+    const azureValid = status.results.azure_openai?.status === 'valid';
     const anthropicValid = status.results.anthropic?.status === 'valid';
     const vertexValid = status.results.vertex?.status === 'valid';
+    const hasLLMProvider = openaiValid || azureValid;
+    const providerName = openaiValid ? 'OpenAI' : 'Azure OpenAI';
     
-    if (!openaiValid) {
-      return 'OpenAI API key required - Click to configure';
-    } else if (openaiValid && anthropicValid && vertexValid) {
+    if (!hasLLMProvider) {
+      return 'OpenAI or Azure OpenAI API key required - Click to configure';
+    } else if (hasLLMProvider && anthropicValid && vertexValid) {
       return 'All API credentials valid - Click to manage';
     } else {
       const missing = [];
       if (!anthropicValid) missing.push('Anthropic');
       if (!vertexValid) missing.push('Vertex AI');
-      return `OpenAI valid, ${missing.join(' and ')} missing - Click to configure`;
+      return `${providerName} valid, ${missing.join(' and ')} missing - Click to configure`;
     }
   };
 

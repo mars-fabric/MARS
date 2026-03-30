@@ -134,13 +134,28 @@ async def get_credentials_status():
         creds = _get_credentials_module()
         results = await creds["test_all_credentials"]()
 
+        # Determine which LLM providers are usable
+        openai_valid = results.get('openai') and results['openai'].status == 'valid'
+        azure_valid = results.get('azure_openai') and results['azure_openai'].status == 'valid'
+        has_llm_provider = openai_valid or azure_valid
+        
+        # Determine active provider
+        if openai_valid:
+            active_provider = 'openai'
+        elif azure_valid:
+            active_provider = 'azure'
+        else:
+            active_provider = 'none'
+
         # Create summary status
         summary = {
             "total": len(results),
             "valid": sum(1 for r in results.values() if r.status == "valid"),
             "invalid": sum(1 for r in results.values() if r.status == "invalid"),
             "not_configured": sum(1 for r in results.values() if r.status == "not_configured"),
-            "errors": sum(1 for r in results.values() if r.status == "error")
+            "errors": sum(1 for r in results.values() if r.status == "error"),
+            "has_llm_provider": has_llm_provider,
+            "active_provider": active_provider
         }
 
         return {
