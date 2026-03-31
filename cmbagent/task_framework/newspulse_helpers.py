@@ -526,6 +526,27 @@ def generate_pdf_from_markdown(
     try:
         from fpdf import FPDF
 
+        # Sanitize Unicode characters that latin-1 can't encode
+        _unicode_replacements = {
+            '\u2014': '--',   # em dash
+            '\u2013': '-',    # en dash
+            '\u2018': "'",    # left single quote
+            '\u2019': "'",    # right single quote
+            '\u201c': '"',    # left double quote
+            '\u201d': '"',    # right double quote
+            '\u2026': '...',  # ellipsis
+            '\u2022': '*',    # bullet
+            '\u00a0': ' ',    # non-breaking space
+            '\u200b': '',     # zero-width space
+        }
+
+        def _sanitize_for_latin1(text: str) -> str:
+            for char, replacement in _unicode_replacements.items():
+                text = text.replace(char, replacement)
+            return text.encode('latin-1', errors='replace').decode('latin-1')
+
+        markdown_content = _sanitize_for_latin1(markdown_content)
+
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
