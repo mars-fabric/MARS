@@ -48,19 +48,49 @@ def _get_llm_client(state: Dict[str, Any]):
     return client, model
 
 
+_USE_MAX_COMPLETION_TOKENS = True  # default to newer param
+
+
 def _call_llm(state: Dict[str, Any], prompt: str, max_tokens: int = 4096) -> str:
-    """Make a single LLM call and return the response text."""
+    """Make a single LLM call and return the response text.
+
+    Handles both older models (max_tokens) and newer models
+    (max_completion_tokens) automatically, with retry on mismatch.
+    """
+    global _USE_MAX_COMPLETION_TOKENS
     client, model = _get_llm_client(state)
     temperature = state.get("llm_temperature", 0.7)
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
-    text = response.choices[0].message.content or ""
-    # Strip wrapping code fences that models sometimes add
-    return _strip_code_fences(text)
+    use_completion_tokens = _USE_MAX_COMPLETION_TOKENS
+
+    for _attempt in range(2):
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if use_completion_tokens:
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+            kwargs["temperature"] = temperature
+
+        try:
+            response = client.chat.completions.create(**kwargs)
+            text = response.choices[0].message.content or ""
+            return _strip_code_fences(text)
+        except Exception as e:
+            err_str = str(e)
+            if "max_tokens" in err_str and "max_completion_tokens" in err_str:
+                # Flip the flag and retry once
+                use_completion_tokens = not use_completion_tokens
+                _USE_MAX_COMPLETION_TOKENS = use_completion_tokens
+                logger.info(
+                    "Switching to %s for NewsPulse LLM calls",
+                    "max_completion_tokens" if use_completion_tokens else "max_tokens",
+                )
+                continue
+            raise
+
+    raise RuntimeError("NewsPulse LLM call failed after token-param retry")
 
 
 def _strip_code_fences(text: str) -> str:
