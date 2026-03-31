@@ -526,7 +526,7 @@ def generate_pdf_from_markdown(
     try:
         from fpdf import FPDF
 
-        # Sanitize Unicode characters that latin-1 can't encode
+        # ── Unicode sanitization for latin-1 ──
         _unicode_replacements = {
             '\u2014': '--',   # em dash
             '\u2013': '-',    # en dash
@@ -538,6 +538,14 @@ def generate_pdf_from_markdown(
             '\u2022': '*',    # bullet
             '\u00a0': ' ',    # non-breaking space
             '\u200b': '',     # zero-width space
+            '\U0001f7e1': '[Y]',  # yellow circle
+            '\U0001f7e2': '[G]',  # green circle
+            '\U0001f534': '[R]',  # red circle
+            '\U0001f4c8': '^',    # chart increasing
+            '\u27a1\ufe0f': '->',  # right arrow with variant
+            '\u27a1': '->',        # right arrow
+            '\u2197\ufe0f': '^',   # north-east arrow
+            '\u2198\ufe0f': 'v',   # south-east arrow
         }
 
         def _sanitize_for_latin1(text: str) -> str:
@@ -545,50 +553,225 @@ def generate_pdf_from_markdown(
                 text = text.replace(char, replacement)
             return text.encode('latin-1', errors='replace').decode('latin-1')
 
+        def _strip_md_formatting(text: str) -> str:
+            """Strip markdown inline formatting to plain text."""
+            # Remove HTML comments
+            text = re.sub(r'<!--.*?-->', '', text, flags=re.DOTALL)
+            # Convert markdown links [text](url) -> text (url)
+            text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1 (\2)', text)
+            # Remove bold+italic (***text*** or ___text___)
+            text = re.sub(r'\*{3}(.+?)\*{3}', r'\1', text)
+            text = re.sub(r'_{3}(.+?)_{3}', r'\1', text)
+            # Remove bold (**text** or __text__)
+            text = re.sub(r'\*{2}(.+?)\*{2}', r'\1', text)
+            text = re.sub(r'_{2}(.+?)_{2}', r'\1', text)
+            # Remove italic (*text* or _text_) — careful with bullet lists
+            text = re.sub(r'(?<!\w)\*([^*\n]+?)\*(?!\w)', r'\1', text)
+            text = re.sub(r'(?<!\w)_([^_\n]+?)_(?!\w)', r'\1', text)
+            # Remove backtick code
+            text = re.sub(r'`([^`]*)`', r'\1', text)
+            return text.strip()
+
         markdown_content = _sanitize_for_latin1(markdown_content)
 
         pdf = FPDF()
         pdf.set_auto_page_break(auto=True, margin=15)
         pdf.add_page()
 
-        # Title
-        pdf.set_font("Helvetica", "B", 18)
-        pdf.cell(0, 12, f"Industry News & Sentiment Pulse", ln=True, align="C")
-        pdf.set_font("Helvetica", "", 12)
+        # Title block
+        pdf.set_font("Helvetica", "B", 20)
+        pdf.cell(0, 12, "Industry News & Sentiment Pulse", ln=True, align="C")
+        pdf.set_font("Helvetica", "", 13)
         pdf.cell(0, 8, industry, ln=True, align="C")
-        pdf.cell(0, 6, datetime.now().strftime("%B %d, %Y"), ln=True, align="C")
-        pdf.ln(10)
+        pdf.set_font("Helvetica", "I", 10)
+        pdf.cell(0, 6, f"Executive Intelligence Report  |  {datetime.now().strftime('%B %d, %Y')}", ln=True, align="C")
+        pdf.ln(4)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(6)
 
-        # Body
-        for line in markdown_content.split('\n'):
-            line = line.rstrip()
+        in_html_comment = False
+        in_blockquote = False
+        blockquote_lines: list[str] = []
+        # Track table state for proper rendering
+        in_table = False
+        table_rows: list[list[str]] = []
+        table_col_count = 0
+
+        def _flush_blockquote():
+            nonlocal in_blockquote, blockquote_lines
+            if blockquote_lines:
+                pdf.set_fill_color(240, 244, 250)
+                pdf.set_draw_color(30, 64, 175)
+                x = pdf.get_x()
+                y = pdf.get_y()
+                # Draw left border
+                bq_text = "\n".join(blockquote_lines)
+                pdf.set_font("Helvetica", "I", 9)
+                pdf.set_x(x + 6)
+                pdf.multi_cell(170, 5, _strip_md_formatting(bq_text), fill=True)
+                pdf.ln(2)
+                blockquote_lines = []
+            in_blockquote = False
+
+        def _flush_table():
+            nonlocal in_table, table_rows, table_col_count
+            if not table_rows:
+                in_table = False
+                return
+            # Calculate column widths
+            page_w = 190
+            col_w = page_w / max(table_col_count, 1)
+            for row_idx, cells in enumerate(table_rows):
+                if row_idx == 0:
+                    # Header row
+                    pdf.set_font("Helvetica", "B", 8)
+                    pdf.set_fill_color(30, 64, 175)
+                    pdf.set_text_color(255, 255, 255)
+                    for cell in cells:
+                        pdf.cell(col_w, 6, _strip_md_formatting(cell.strip())[:30], border=1, fill=True, align="C")
+                    pdf.ln()
+                    pdf.set_text_color(0, 0, 0)
+                else:
+                    # Data rows
+                    pdf.set_font("Helvetica", "", 8)
+                    fill = row_idx % 2 == 0
+                    if fill:
+                        pdf.set_fill_color(248, 250, 252)
+                    for cell in cells:
+                        pdf.cell(col_w, 5, _strip_md_formatting(cell.strip())[:30], border=1, fill=fill)
+                    pdf.ln()
+            pdf.ln(2)
+            table_rows = []
+            table_col_count = 0
+            in_table = False
+
+        lines = markdown_content.split('\n')
+        i = 0
+        while i < len(lines):
+            line = lines[i].rstrip()
+            i += 1
+
+            # Skip HTML comments
+            if '<!--' in line:
+                if '-->' not in line:
+                    in_html_comment = True
+                continue
+            if in_html_comment:
+                if '-->' in line:
+                    in_html_comment = False
+                continue
+
+            # ── Blockquotes ──
+            if line.startswith('> '):
+                if not in_blockquote:
+                    in_blockquote = True
+                blockquote_lines.append(line[2:])
+                continue
+            elif in_blockquote:
+                _flush_blockquote()
+
+            # ── Table rows ──
+            if line.startswith('|'):
+                # Skip separator rows (|---|---|)
+                if re.match(r'^\|[\s\-:|]+\|$', line):
+                    continue
+                cells = [c.strip() for c in line.split('|')[1:-1]]
+                if not in_table:
+                    in_table = True
+                    table_col_count = len(cells)
+                table_rows.append(cells)
+                continue
+            elif in_table:
+                _flush_table()
+
+            # ── Horizontal rule ──
+            if line.strip() == '---':
+                pdf.ln(2)
+                pdf.set_draw_color(200, 200, 200)
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                pdf.ln(4)
+                continue
+
+            # ── Headings ──
+            if line.startswith('#### '):
+                pdf.set_font("Helvetica", "B", 11)
+                pdf.ln(4)
+                pdf.multi_cell(0, 6, _strip_md_formatting(line[5:]))
+                pdf.ln(1)
+                continue
+            if line.startswith('### '):
+                pdf.set_font("Helvetica", "B", 12)
+                pdf.ln(4)
+                pdf.multi_cell(0, 6, _strip_md_formatting(line[4:]))
+                pdf.ln(1)
+                continue
+            if line.startswith('## '):
+                pdf.ln(3)
+                pdf.set_draw_color(30, 64, 175)
+                pdf.set_fill_color(30, 64, 175)
+                pdf.rect(10, pdf.get_y(), 3, 8, 'F')
+                pdf.set_x(16)
+                pdf.set_font("Helvetica", "B", 14)
+                pdf.cell(0, 8, _strip_md_formatting(line[3:]), ln=True)
+                pdf.set_draw_color(226, 232, 240)
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+                pdf.ln(3)
+                continue
             if line.startswith('# '):
                 pdf.set_font("Helvetica", "B", 16)
-                pdf.ln(6)
-                pdf.multi_cell(0, 8, line[2:])
-            elif line.startswith('## '):
-                pdf.set_font("Helvetica", "B", 14)
-                pdf.ln(4)
-                pdf.multi_cell(0, 7, line[3:])
-            elif line.startswith('### '):
-                pdf.set_font("Helvetica", "B", 12)
+                pdf.ln(5)
+                pdf.multi_cell(0, 9, _strip_md_formatting(line[2:]))
+                pdf.set_draw_color(30, 64, 175)
+                pdf.line(10, pdf.get_y(), 200, pdf.get_y())
                 pdf.ln(3)
-                pdf.multi_cell(0, 6, line[4:])
-            elif line.startswith('- ') or line.startswith('* '):
+                continue
+
+            # ── Numbered list ──
+            num_match = re.match(r'^(\d+)\.\s+(.+)', line)
+            if num_match:
+                num = num_match.group(1)
+                content = _strip_md_formatting(num_match.group(2))
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.cell(8, 5, f"{num}.")
                 pdf.set_font("Helvetica", "", 10)
-                pdf.multi_cell(0, 5, f"  \u2022 {line[2:]}")
-            elif line.startswith('|'):
-                pdf.set_font("Courier", "", 9)
-                pdf.multi_cell(0, 4, line)
-            elif line.strip() == '---':
-                pdf.ln(3)
-                pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
-                pdf.ln(3)
-            elif line.strip():
+                pdf.multi_cell(0, 5, content)
+                pdf.ln(1)
+                continue
+
+            # ── Bullet list ──
+            if line.startswith('- ') or line.startswith('* '):
+                content = _strip_md_formatting(line[2:])
                 pdf.set_font("Helvetica", "", 10)
-                pdf.multi_cell(0, 5, line)
-            else:
-                pdf.ln(3)
+                pdf.cell(6, 5, " -")
+                pdf.multi_cell(0, 5, content)
+                pdf.ln(1)
+                continue
+
+            # ── Normal paragraph text ──
+            if line.strip():
+                pdf.set_font("Helvetica", "", 10)
+                pdf.multi_cell(0, 5, _strip_md_formatting(line))
+                continue
+
+            # ── Blank line ──
+            pdf.ln(2)
+
+        # Flush any remaining blockquote/table
+        if in_blockquote:
+            _flush_blockquote()
+        if in_table:
+            _flush_table()
+
+        # Footer
+        pdf.ln(8)
+        pdf.set_draw_color(226, 232, 240)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(4)
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.set_text_color(148, 163, 184)
+        pdf.cell(0, 4, f"Generated by MARS AI Research Platform  |  {datetime.now().strftime('%Y-%m-%d %H:%M')} UTC", ln=True, align="C")
+        pdf.cell(0, 4, "All information sourced from publicly available data. Verify independently.", ln=True, align="C")
+        pdf.set_text_color(0, 0, 0)
 
         pdf.output(pdf_path)
         logger.info("PDF generated via fpdf2: %s", pdf_path)
