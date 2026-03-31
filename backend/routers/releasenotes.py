@@ -550,16 +550,14 @@ async def _run_collect_and_diff(shared_state: Dict[str, Any], work_dir: str, buf
 
 def _call_llm_sync(prompt: str, config_overrides: Dict[str, Any], max_completion_tokens: int = 8192) -> str:
     """Synchronous LLM call for use in thread pools."""
-    from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
+    from cmbagent.llm_provider import safe_completion
     model = config_overrides.get("model", "gpt-4o")
-    client = create_openai_client()
-    response = client.chat.completions.create(
-        model=resolve_model_for_provider(model),
+    return safe_completion(
         messages=[{"role": "user", "content": prompt}],
-        max_completion_tokens=max_completion_tokens,
+        model=model,
         temperature=0.4,
+        max_tokens=max_completion_tokens,
     )
-    return response.choices[0].message.content
 
 
 async def _run_analysis_stage(
@@ -1042,14 +1040,13 @@ async def refine_stage_content(task_id: str, stage_num: int, request: ReleaseNot
     )
     try:
         def _call():
-            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-            client = create_openai_client()
-            resp = client.chat.completions.create(
-                model=resolve_model_for_provider("gpt-4o"),
+            from cmbagent.llm_provider import safe_completion
+            return safe_completion(
                 messages=[{"role": "user", "content": prompt}],
-                max_completion_tokens=4096, temperature=0.7,
+                model="gpt-4o",
+                temperature=0.7,
+                max_tokens=4096,
             )
-            return resp.choices[0].message.content
 
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as executor:

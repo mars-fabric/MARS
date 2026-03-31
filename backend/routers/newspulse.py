@@ -889,15 +889,13 @@ async def refine_stage_content(task_id: str, stage_num: int, request: NewsPulseR
 
     try:
         def _call_llm():
-            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-            client = create_openai_client()
-            response = client.chat.completions.create(
-                model=resolve_model_for_provider("gpt-4o"),
+            from cmbagent.llm_provider import safe_completion
+            return safe_completion(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
+                model="gpt-4o",
                 temperature=0.7,
+                max_tokens=4096,
             )
-            return response.choices[0].message.content
 
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as executor:

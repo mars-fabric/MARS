@@ -3,7 +3,7 @@ const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const nextConfig = {
   // Allow cross-origin dev requests from the server's IP
-  allowedDevOrigins: ['100.88.49.58'],
+  allowedDevOrigins: ['100.88.49.58', 'localhost', '127.0.0.1'],
 
   // Disable strict mode to prevent double-render in dev (a common lag source)
   reactStrictMode: false,

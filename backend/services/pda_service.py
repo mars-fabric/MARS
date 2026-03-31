@@ -179,11 +179,11 @@ def _call_llm_direct(
             kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": messages,
+                "temperature": temperature,
             }
             if use_completion_tokens:
                 kwargs["max_completion_tokens"] = max_tokens
             else:
-                kwargs["temperature"] = temperature
                 kwargs["max_tokens"] = max_tokens
 
             response = client.chat.completions.create(**kwargs)

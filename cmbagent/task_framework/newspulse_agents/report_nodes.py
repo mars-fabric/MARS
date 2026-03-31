@@ -12,6 +12,7 @@ Flow:
 """
 
 import os
+import json
 import logging
 from datetime import datetime
 from typing import Dict, Any
@@ -66,12 +67,12 @@ def _call_llm(state: Dict[str, Any], prompt: str, max_tokens: int = 4096) -> str
         kwargs: Dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
+            "temperature": temperature,
         }
         if use_completion_tokens:
             kwargs["max_completion_tokens"] = max_tokens
         else:
             kwargs["max_tokens"] = max_tokens
-            kwargs["temperature"] = temperature
 
         try:
             response = client.chat.completions.create(**kwargs)
@@ -265,35 +266,169 @@ Output ONLY the section content in plain markdown. No heading. No code fences.
 # ═══════════════════════════════════════════════════════════════════════════
 
 def sentiment_dashboard_node(state: Dict[str, Any]) -> Dict[str, Any]:
-    """Generate the Market Sentiment Dashboard table."""
+    """Generate the Market Sentiment Dashboard with structured data for charts."""
     prompt = f"""{_COMPILER_SYSTEM}
 
 You are compiling the Market Sentiment Dashboard for an industry report.
+You MUST return ONLY valid JSON — no markdown, no commentary, no code fences.
 
 {_section_context(state)}
 
 ## Analysis Data
 {_truncate(state.get('analysis_summary', ''), 25000)}
 
-Based on the analysis data above, produce a plain markdown table (NO code fences, NO triple backticks):
+Based on the analysis data above, return a JSON object with this EXACT structure:
 
-| Indicator | Status | Trend |
-|---|---|---|
-| Overall Sentiment | [Bullish/Bearish/Neutral/Mixed] | [↑/↓/→] |
-| Industry Momentum | [Strong/Moderate/Weak] | [↑/↓/→] |
-| Risk Level | [Low/Medium/High] | [↑/↓/→] |
-| Investment Activity | [Hot/Warm/Cool] | [↑/↓/→] |
+{{
+  "overall_sentiment": {{
+    "label": "Bullish|Bearish|Neutral|Mixed",
+    "score": <number 0-100, where 0=very bearish, 50=neutral, 100=very bullish>,
+    "trend": "up|down|stable"
+  }},
+  "industry_momentum": {{
+    "label": "Strong|Moderate|Weak",
+    "score": <number 0-100>,
+    "trend": "up|down|stable"
+  }},
+  "risk_level": {{
+    "label": "Low|Medium|High|Critical",
+    "score": <number 0-100, where 0=no risk, 100=extreme risk>,
+    "trend": "up|down|stable"
+  }},
+  "investment_activity": {{
+    "label": "Hot|Warm|Cool|Cold",
+    "score": <number 0-100>,
+    "trend": "up|down|stable"
+  }},
+  "innovation_index": {{
+    "label": "Breakthrough|Active|Moderate|Stagnant",
+    "score": <number 0-100>,
+    "trend": "up|down|stable"
+  }},
+  "sentiment_distribution": {{
+    "positive": <percentage 0-100>,
+    "neutral": <percentage 0-100>,
+    "negative": <percentage 0-100>
+  }},
+  "confidence_score": <number 0-100>,
+  "key_drivers": [
+    "First key sentiment driver (one sentence citing specific data)",
+    "Second key sentiment driver (one sentence citing specific data)",
+    "Third key sentiment driver (one sentence citing specific data)"
+  ],
+  "outlook_signal": "Strong Buy|Buy|Hold|Sell|Strong Sell"
+}}
 
-Then add **Key Sentiment Drivers:** with 2-3 bullet points citing specific findings from the data.
-
-CRITICAL: Output the table directly in plain markdown. Do NOT wrap it in ```markdown``` or any code block.
+IMPORTANT: Return ONLY the JSON object. No markdown. No explanation. No code fences.
 """
-    result = _call_llm(state, prompt, max_tokens=1024)
-    logger.info("sentiment_dashboard_node: %d chars", len(result))
+    raw = _call_llm(state, prompt, max_tokens=1024)
+
+    # Parse JSON from LLM response
+    sentiment_data = _parse_sentiment_json(raw)
+
+    # Generate the markdown dashboard from structured data
+    dashboard_md = _build_sentiment_dashboard_md(sentiment_data)
+
+    logger.info("sentiment_dashboard_node: parsed %d indicators", len(sentiment_data))
     return {
-        "sentiment_dashboard": result,
+        "sentiment_dashboard": dashboard_md,
+        "sentiment_data": sentiment_data,
         "messages": [HumanMessage(content="Sentiment dashboard generated.")],
     }
+
+
+def _parse_sentiment_json(raw: str) -> dict:
+    """Parse sentiment JSON from LLM output, with fallback defaults."""
+    import re
+    # Try to extract JSON from the response
+    cleaned = raw.strip()
+    # Remove wrapping code fences if present
+    m = re.match(r'^```(?:json)?\s*\n(.*?)\n```\s*$', cleaned, re.DOTALL)
+    if m:
+        cleaned = m.group(1).strip()
+
+    defaults = {
+        "overall_sentiment": {"label": "Mixed", "score": 50, "trend": "stable"},
+        "industry_momentum": {"label": "Moderate", "score": 50, "trend": "stable"},
+        "risk_level": {"label": "Medium", "score": 50, "trend": "stable"},
+        "investment_activity": {"label": "Warm", "score": 50, "trend": "stable"},
+        "innovation_index": {"label": "Active", "score": 60, "trend": "up"},
+        "sentiment_distribution": {"positive": 40, "neutral": 35, "negative": 25},
+        "confidence_score": 65,
+        "key_drivers": [
+            "Market data indicates mixed signals across key indicators.",
+            "Industry activity remains at moderate levels.",
+            "Risk factors are balanced against growth opportunities."
+        ],
+        "outlook_signal": "Hold",
+    }
+
+    try:
+        data = json.loads(cleaned)
+        # Validate and fill missing keys
+        for key, default_val in defaults.items():
+            if key not in data:
+                data[key] = default_val
+        return data
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse sentiment JSON, using defaults")
+        return defaults
+
+
+def _build_sentiment_dashboard_md(data: dict) -> str:
+    """Build a rich markdown dashboard from structured sentiment data."""
+    trend_icons = {"up": "📈", "down": "📉", "stable": "➡️"}
+    signal_colors = {
+        "Strong Buy": "🟢🟢", "Buy": "🟢", "Hold": "🟡",
+        "Sell": "🔴", "Strong Sell": "🔴🔴",
+    }
+
+    overall = data.get("overall_sentiment", {})
+    momentum = data.get("industry_momentum", {})
+    risk = data.get("risk_level", {})
+    invest = data.get("investment_activity", {})
+    innov = data.get("innovation_index", {})
+    dist = data.get("sentiment_distribution", {})
+    confidence = data.get("confidence_score", 65)
+    drivers = data.get("key_drivers", [])
+    outlook = data.get("outlook_signal", "Hold")
+
+    def _score_bar(score: int, width: int = 20) -> str:
+        filled = round(score / 100 * width)
+        return "█" * filled + "░" * (width - filled)
+
+    def _trend(t: str) -> str:
+        return trend_icons.get(t, "➡️")
+
+    md = f"""<!-- SENTIMENT_DASHBOARD_START -->
+
+**Overall Market Signal: {signal_colors.get(outlook, '🟡')} {outlook}** | **Confidence: {confidence}%**
+
+---
+
+### Key Indicators
+
+| Indicator | Rating | Score | Trend | Gauge |
+|:---|:---|:---:|:---:|:---|
+| **Overall Sentiment** | {overall.get('label', 'N/A')} | {overall.get('score', 50)}/100 | {_trend(overall.get('trend', 'stable'))} | `{_score_bar(overall.get('score', 50))}` |
+| **Industry Momentum** | {momentum.get('label', 'N/A')} | {momentum.get('score', 50)}/100 | {_trend(momentum.get('trend', 'stable'))} | `{_score_bar(momentum.get('score', 50))}` |
+| **Risk Level** | {risk.get('label', 'N/A')} | {risk.get('score', 50)}/100 | {_trend(risk.get('trend', 'stable'))} | `{_score_bar(risk.get('score', 50))}` |
+| **Investment Activity** | {invest.get('label', 'N/A')} | {invest.get('score', 50)}/100 | {_trend(invest.get('trend', 'stable'))} | `{_score_bar(invest.get('score', 50))}` |
+| **Innovation Index** | {innov.get('label', 'N/A')} | {innov.get('score', 50)}/100 | {_trend(innov.get('trend', 'stable'))} | `{_score_bar(innov.get('score', 50))}` |
+
+### Sentiment Distribution
+
+| Positive | Neutral | Negative |
+|:---:|:---:|:---:|
+| 🟢 **{dist.get('positive', 0)}%** | 🟡 **{dist.get('neutral', 0)}%** | 🔴 **{dist.get('negative', 0)}%** |
+
+### Key Sentiment Drivers
+"""
+    for i, driver in enumerate(drivers[:5], 1):
+        md += f"\n{i}. {driver}"
+
+    md += "\n\n<!-- SENTIMENT_DASHBOARD_END -->\n"
+    return md
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -751,10 +886,14 @@ def pdf_node(state: Dict[str, Any]) -> Dict[str, Any]:
     final_report = state.get("final_report", "")
     work_dir = state.get("work_dir", "")
     industry = state.get("industry", "Industry")
+    sentiment_data = state.get("sentiment_data", {})
 
     pdf_path = ""
     if final_report and work_dir:
-        result = generate_pdf_from_markdown(final_report, work_dir, industry)
+        result = generate_pdf_from_markdown(
+            final_report, work_dir, industry,
+            sentiment_data=sentiment_data,
+        )
         pdf_path = result or ""
 
     logger.info("pdf_node: pdf_path=%s", pdf_path)

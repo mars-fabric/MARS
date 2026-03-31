@@ -313,3 +313,79 @@ def resolve_model_for_provider(model: str) -> str:
         if any(model.startswith(prefix) or model.startswith(prefix.upper()) for prefix in openai_prefixes):
             return config.get_azure_deployment_for_model(model)
     return model
+
+
+# ---------------------------------------------------------------------------
+# Safe completion helper — works with ANY model on ANY provider
+# ---------------------------------------------------------------------------
+
+# Module-level flag: remembers which token param the current model accepts.
+# Auto-detected on first error, then cached for the process lifetime.
+_USE_MAX_COMPLETION_TOKENS: bool = True  # default to newer param
+
+def _set_token_param_flag(val: bool):
+    global _USE_MAX_COMPLETION_TOKENS
+    _USE_MAX_COMPLETION_TOKENS = val
+
+
+def safe_completion(
+    messages: list,
+    model: str = "gpt-4o",
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+    **extra_kwargs,
+) -> str:
+    """
+    Make a chat completion call that works on **any** provider and **any** model.
+
+    Handles the max_tokens vs max_completion_tokens incompatibility:
+      - Newer models (gpt-4o, o1, o3, gpt-5+) require max_completion_tokens.
+      - Older models (gpt-4, gpt-3.5-turbo) require max_tokens.
+      - If the wrong param is sent, the call fails with a 400.
+
+    This function tries the currently-cached param, and on a mismatch error
+    it flips to the other param and retries once.  The result is cached
+    for subsequent calls (process-global).
+
+    Returns:
+        The assistant message content string.
+
+    Raises:
+        RuntimeError if both attempts fail.
+    """
+    global _USE_MAX_COMPLETION_TOKENS
+
+    client = create_openai_client()
+    resolved_model = resolve_model_for_provider(model)
+    use_completion_tokens = _USE_MAX_COMPLETION_TOKENS
+
+    for _attempt in range(2):
+        kwargs: Dict[str, Any] = {
+            "model": resolved_model,
+            "messages": messages,
+            "temperature": temperature,
+            **extra_kwargs,
+        }
+        if use_completion_tokens:
+            kwargs["max_completion_tokens"] = max_tokens
+        else:
+            kwargs["max_tokens"] = max_tokens
+
+        try:
+            response = client.chat.completions.create(**kwargs)
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            err_str = str(e).lower()
+            # Detect the specific "unsupported parameter" mismatch
+            if "max_tokens" in err_str and "max_completion_tokens" in err_str:
+                use_completion_tokens = not use_completion_tokens
+                _USE_MAX_COMPLETION_TOKENS = use_completion_tokens
+                logger.info(
+                    "Token param auto-switch -> %s",
+                    "max_completion_tokens" if use_completion_tokens else "max_tokens",
+                )
+                continue
+            # Not a token-param error — propagate immediately
+            raise
+
+    raise RuntimeError("LLM call failed after token-param auto-detection retry")

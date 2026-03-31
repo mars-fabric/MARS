@@ -481,11 +481,22 @@ def build_final_report_output(
     }
 
 
-def generate_pdf_from_markdown(markdown_content: str, work_dir: str, industry: str) -> Optional[str]:
+def generate_pdf_from_markdown(
+    markdown_content: str,
+    work_dir: str,
+    industry: str,
+    sentiment_data: dict | None = None,
+) -> Optional[str]:
     """Convert a markdown report to PDF.
 
     Uses markdown → HTML → PDF conversion via weasyprint (if available),
     falls back to a simple text-based approach.
+
+    Args:
+        markdown_content: Full markdown report text.
+        work_dir: Working directory for output files.
+        industry: Industry name for the report title.
+        sentiment_data: Optional structured sentiment dict for chart rendering.
     """
     output_dir = os.path.join(str(work_dir), "output")
     os.makedirs(output_dir, exist_ok=True)
@@ -494,10 +505,19 @@ def generate_pdf_from_markdown(markdown_content: str, work_dir: str, industry: s
     pdf_filename = f"news_sentiment_pulse_{safe_name}_{datetime.now().strftime('%Y%m%d')}.pdf"
     pdf_path = os.path.join(output_dir, pdf_filename)
 
+    # Generate chart images if we have sentiment data and matplotlib
+    chart_paths = {}
+    if sentiment_data:
+        try:
+            chart_paths = _generate_sentiment_charts(sentiment_data, output_dir)
+            logger.info("Generated %d chart images for PDF", len(chart_paths))
+        except Exception as e:
+            logger.warning("Chart generation failed (continuing without charts): %s", e)
+
     try:
         from weasyprint import HTML
-        html_content = _markdown_to_html(markdown_content, industry)
-        HTML(string=html_content).write_pdf(pdf_path)
+        html_content = _markdown_to_html(markdown_content, industry, sentiment_data, chart_paths)
+        HTML(string=html_content, base_url=output_dir).write_pdf(pdf_path)
         logger.info("PDF generated via weasyprint: %s", pdf_path)
         return pdf_path
     except ImportError:
@@ -557,8 +577,218 @@ def generate_pdf_from_markdown(markdown_content: str, work_dir: str, industry: s
         return None
 
 
-def _markdown_to_html(markdown_content: str, industry: str) -> str:
-    """Convert markdown to styled HTML for PDF rendering."""
+# ═══════════════════════════════════════════════════════════════════════════
+# Chart generation helpers
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _generate_sentiment_charts(sentiment_data: dict, output_dir: str) -> dict:
+    """Generate matplotlib chart images and return {name: file_path} dict."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as mpatches
+    from matplotlib.patches import FancyBboxPatch
+    import numpy as np
+
+    chart_paths = {}
+
+    # ── 1. Gauge chart for overall sentiment ──
+    try:
+        fig, ax = plt.subplots(figsize=(5, 3), subplot_kw={"projection": "polar"})
+        overall = sentiment_data.get("overall_sentiment", {})
+        score = overall.get("score", 50)
+
+        # Half-circle gauge
+        theta = np.linspace(np.pi, 0, 200)
+        colors_gradient = plt.cm.RdYlGn(np.linspace(0, 1, 200))
+
+        for i in range(len(theta) - 1):
+            ax.bar(theta[i], 1, width=(theta[i] - theta[i+1]),
+                   bottom=0.6, color=colors_gradient[i], edgecolor="none")
+
+        # Needle
+        needle_angle = np.pi - (score / 100) * np.pi
+        ax.plot([needle_angle, needle_angle], [0, 1.5], color="#1a1a2e",
+                linewidth=2.5, solid_capstyle="round")
+        ax.plot(needle_angle, 1.5, "o", color="#1a1a2e", markersize=4)
+        ax.plot(needle_angle, 0, "o", color="#1a1a2e", markersize=8)
+
+        ax.set_ylim(0, 2)
+        ax.set_thetamin(0)
+        ax.set_thetamax(180)
+        ax.set_rticks([])
+        ax.set_thetagrids([])
+        ax.spines["polar"].set_visible(False)
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+
+        # Labels
+        ax.text(np.pi, -0.3, "Bearish", ha="center", fontsize=8, color="#e74c3c", fontweight="bold")
+        ax.text(np.pi/2, -0.3, "Neutral", ha="center", fontsize=8, color="#f39c12", fontweight="bold")
+        ax.text(0, -0.3, "Bullish", ha="center", fontsize=8, color="#27ae60", fontweight="bold")
+        ax.text(np.pi/2, -0.7, f"{overall.get('label', 'N/A')} — {score}/100",
+                ha="center", fontsize=12, fontweight="bold", color="#1a1a2e")
+
+        plt.tight_layout()
+        path = os.path.join(output_dir, "chart_gauge.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        chart_paths["gauge"] = path
+    except Exception as e:
+        logger.warning("Gauge chart failed: %s", e)
+
+    # ── 2. Horizontal bar chart for all indicators ──
+    try:
+        indicators = [
+            ("Overall Sentiment", sentiment_data.get("overall_sentiment", {}).get("score", 50)),
+            ("Industry Momentum", sentiment_data.get("industry_momentum", {}).get("score", 50)),
+            ("Investment Activity", sentiment_data.get("investment_activity", {}).get("score", 50)),
+            ("Innovation Index", sentiment_data.get("innovation_index", {}).get("score", 50)),
+            ("Risk Level", sentiment_data.get("risk_level", {}).get("score", 50)),
+        ]
+        labels = [i[0] for i in indicators]
+        scores = [i[1] for i in indicators]
+
+        fig, ax = plt.subplots(figsize=(7, 3.5))
+
+        # Color gradient based on score
+        bar_colors = []
+        for s in scores:
+            if s >= 70:
+                bar_colors.append("#27ae60")
+            elif s >= 50:
+                bar_colors.append("#f39c12")
+            elif s >= 30:
+                bar_colors.append("#e67e22")
+            else:
+                bar_colors.append("#e74c3c")
+        # Risk level: invert color logic
+        risk_score = scores[-1]
+        if risk_score >= 70:
+            bar_colors[-1] = "#e74c3c"
+        elif risk_score >= 50:
+            bar_colors[-1] = "#e67e22"
+        elif risk_score >= 30:
+            bar_colors[-1] = "#f39c12"
+        else:
+            bar_colors[-1] = "#27ae60"
+
+        y_pos = range(len(labels))
+        bars = ax.barh(y_pos, scores, height=0.6, color=bar_colors,
+                       edgecolor="white", linewidth=0.5, zorder=3)
+
+        # Background bars (track)
+        ax.barh(y_pos, [100]*len(labels), height=0.6, color="#f0f0f0",
+                edgecolor="none", zorder=1)
+
+        # Score labels on bars
+        for i, (bar, score) in enumerate(zip(bars, scores)):
+            ax.text(score + 2, i, f"{score}", va="center", fontsize=10,
+                    fontweight="bold", color="#333")
+
+        ax.set_yticks(y_pos)
+        ax.set_yticklabels(labels, fontsize=10, fontweight="500")
+        ax.set_xlim(0, 110)
+        ax.set_xlabel("Score (0–100)", fontsize=9, color="#666")
+        ax.invert_yaxis()
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["bottom"].set_color("#ddd")
+        ax.spines["left"].set_visible(False)
+        ax.tick_params(left=False, bottom=True, colors="#999")
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+
+        plt.tight_layout()
+        path = os.path.join(output_dir, "chart_indicators.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        chart_paths["indicators"] = path
+    except Exception as e:
+        logger.warning("Indicator bar chart failed: %s", e)
+
+    # ── 3. Donut chart for sentiment distribution ──
+    try:
+        dist = sentiment_data.get("sentiment_distribution", {})
+        sizes = [dist.get("positive", 40), dist.get("neutral", 35), dist.get("negative", 25)]
+        labels = ["Positive", "Neutral", "Negative"]
+        colors = ["#27ae60", "#f39c12", "#e74c3c"]
+        explode = (0.03, 0.03, 0.03)
+
+        fig, ax = plt.subplots(figsize=(4, 4))
+        wedges, texts, autotexts = ax.pie(
+            sizes, labels=labels, colors=colors, explode=explode,
+            autopct="%1.0f%%", startangle=90, pctdistance=0.78,
+            wedgeprops=dict(width=0.4, edgecolor="white", linewidth=2),
+            textprops={"fontsize": 10, "fontweight": "500"},
+        )
+        for t in autotexts:
+            t.set_fontsize(11)
+            t.set_fontweight("bold")
+            t.set_color("white")
+
+        # Center circle decoration
+        confidence = sentiment_data.get("confidence_score", 65)
+        ax.text(0, 0.08, f"{confidence}%", ha="center", va="center",
+                fontsize=22, fontweight="bold", color="#1a1a2e")
+        ax.text(0, -0.15, "Confidence", ha="center", va="center",
+                fontsize=9, color="#666")
+
+        ax.set_facecolor("white")
+        fig.patch.set_facecolor("white")
+        plt.tight_layout()
+        path = os.path.join(output_dir, "chart_distribution.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        chart_paths["distribution"] = path
+    except Exception as e:
+        logger.warning("Distribution donut chart failed: %s", e)
+
+    # ── 4. Outlook signal badge ──
+    try:
+        outlook = sentiment_data.get("outlook_signal", "Hold")
+        signal_map = {
+            "Strong Buy": ("#27ae60", "⬆⬆"),
+            "Buy": ("#2ecc71", "⬆"),
+            "Hold": ("#f39c12", "⬌"),
+            "Sell": ("#e74c3c", "⬇"),
+            "Strong Sell": ("#c0392b", "⬇⬇"),
+        }
+        color, arrow = signal_map.get(outlook, ("#f39c12", "⬌"))
+
+        fig, ax = plt.subplots(figsize=(3.5, 1.2))
+        ax.set_xlim(0, 10)
+        ax.set_ylim(0, 3)
+        ax.axis("off")
+
+        # Badge background
+        badge = FancyBboxPatch((0.3, 0.3), 9.4, 2.4, boxstyle="round,pad=0.3",
+                               facecolor=color, edgecolor="white", linewidth=2, alpha=0.95)
+        ax.add_patch(badge)
+
+        ax.text(5, 1.5, f"OUTLOOK: {outlook.upper()}", ha="center", va="center",
+                fontsize=16, fontweight="bold", color="white",
+                fontfamily="sans-serif")
+
+        fig.patch.set_facecolor("white")
+        plt.tight_layout()
+        path = os.path.join(output_dir, "chart_outlook.png")
+        fig.savefig(path, dpi=150, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        chart_paths["outlook"] = path
+    except Exception as e:
+        logger.warning("Outlook badge chart failed: %s", e)
+
+    return chart_paths
+
+
+def _markdown_to_html(
+    markdown_content: str,
+    industry: str,
+    sentiment_data: dict | None = None,
+    chart_paths: dict | None = None,
+) -> str:
+    """Convert markdown to styled HTML for PDF rendering with embedded charts."""
     try:
         import markdown
         body = markdown.markdown(
@@ -570,147 +800,301 @@ def _markdown_to_html(markdown_content: str, industry: str) -> str:
         import html
         body = f"<pre>{html.escape(markdown_content)}</pre>"
 
+    # Build chart HTML to inject into the sentiment dashboard section
+    chart_html = _build_chart_html(sentiment_data, chart_paths)
+
+    # Replace the markdown-rendered sentiment dashboard with chart version
+    if chart_html:
+        import re as _re
+        # Find the sentiment dashboard section and inject charts after it
+        pattern = r'(<!-- SENTIMENT_DASHBOARD_START -->.*?<!-- SENTIMENT_DASHBOARD_END -->)'
+        replacement = chart_html
+        body = _re.sub(pattern, replacement, body, flags=_re.DOTALL)
+
     return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
   @page {{
-    margin: 2cm 2.5cm;
+    size: A4;
+    margin: 2cm 2cm;
     @top-center {{
       content: "{industry} — Industry News & Sentiment Pulse";
-      font-size: 8pt;
-      color: #888;
+      font-size: 7.5pt;
+      color: #999;
+      font-family: 'Helvetica Neue', Arial, sans-serif;
     }}
-    @bottom-center {{
+    @bottom-left {{
+      content: "MARS AI Research Platform — Confidential";
+      font-size: 7pt;
+      color: #bbb;
+    }}
+    @bottom-right {{
       content: "Page " counter(page) " of " counter(pages);
-      font-size: 8pt;
-      color: #888;
+      font-size: 7.5pt;
+      color: #999;
     }}
   }}
   body {{
     font-family: 'Helvetica Neue', Arial, sans-serif;
-    font-size: 10.5pt;
-    line-height: 1.65;
-    color: #1a1a2e;
+    font-size: 10pt;
+    line-height: 1.7;
+    color: #1e293b;
     max-width: 780px;
     margin: 0 auto;
   }}
+
+  /* ── Typography ── */
   h1 {{
-    color: #0a1628;
-    border-bottom: 3px solid #0f3460;
-    padding-bottom: 10px;
-    font-size: 24pt;
+    color: #0f172a;
+    border-bottom: 3px solid #1e40af;
+    padding-bottom: 12px;
+    font-size: 22pt;
     letter-spacing: -0.5px;
     margin-top: 0;
+    font-weight: 800;
   }}
   h2 {{
-    color: #0f3460;
-    border-bottom: 2px solid #e8edf3;
-    padding-bottom: 6px;
-    margin-top: 28px;
-    font-size: 16pt;
+    color: #1e40af;
+    border-bottom: 2px solid #e2e8f0;
+    padding-bottom: 8px;
+    margin-top: 32px;
+    font-size: 15pt;
     letter-spacing: -0.3px;
     page-break-after: avoid;
+    font-weight: 700;
+  }}
+  h2::before {{
+    content: "";
+    display: inline-block;
+    width: 4px;
+    height: 18px;
+    background: linear-gradient(180deg, #1e40af, #7c3aed);
+    margin-right: 10px;
+    vertical-align: middle;
+    border-radius: 2px;
   }}
   h3 {{
-    color: #533483;
-    margin-top: 18px;
-    font-size: 13pt;
+    color: #7c3aed;
+    margin-top: 20px;
+    font-size: 12pt;
     page-break-after: avoid;
+    font-weight: 600;
   }}
   h4 {{
-    color: #2d4a7a;
-    margin-top: 14px;
+    color: #334155;
+    margin-top: 16px;
     font-size: 11pt;
     page-break-after: avoid;
+    font-weight: 600;
   }}
+  p {{
+    margin: 8px 0;
+    text-align: justify;
+  }}
+
+  /* ── Tables ── */
   table {{
     border-collapse: collapse;
     width: 100%;
-    margin: 14px 0;
-    font-size: 10pt;
+    margin: 16px 0;
+    font-size: 9.5pt;
+    border-radius: 6px;
+    overflow: hidden;
   }}
   th, td {{
-    border: 1px solid #d1d5db;
+    border: 1px solid #e2e8f0;
     padding: 10px 14px;
     text-align: left;
   }}
   th {{
-    background: linear-gradient(135deg, #0f3460, #1a5276);
+    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
     color: white;
     font-weight: 600;
     text-transform: uppercase;
-    font-size: 9pt;
-    letter-spacing: 0.5px;
+    font-size: 8.5pt;
+    letter-spacing: 0.8px;
   }}
-  tr:nth-child(even) {{ background-color: #f8f9fb; }}
-  tr:hover {{ background-color: #eef2f7; }}
+  tr:nth-child(even) {{ background-color: #f8fafc; }}
+  td:first-child {{ font-weight: 500; }}
+
+  /* ── Lists ── */
   ul, ol {{ margin: 10px 0; padding-left: 24px; }}
   li {{ margin-bottom: 6px; }}
+
+  /* ── Dividers ── */
   hr {{
     border: none;
-    border-top: 2px solid #e8edf3;
-    margin: 24px 0;
+    border-top: 1px solid #e2e8f0;
+    margin: 28px 0;
   }}
+
+  /* ── Blockquotes (used for report metadata) ── */
   blockquote {{
-    border-left: 4px solid #0f3460;
+    border-left: 4px solid #1e40af;
     margin: 16px 0;
-    padding: 12px 20px;
-    background-color: #f8f9fb;
+    padding: 14px 20px;
+    background: linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%);
     color: #374151;
-    font-style: italic;
-    font-size: 10pt;
+    font-size: 9.5pt;
+    border-radius: 0 6px 6px 0;
   }}
-  strong {{ color: #1a1a2e; }}
-  a {{ color: #0f3460; text-decoration: none; }}
+  blockquote strong {{ color: #1e293b; }}
+
+  /* ── Links ── */
+  a {{ color: #1e40af; text-decoration: none; }}
   a:hover {{ text-decoration: underline; }}
+  strong {{ color: #0f172a; }}
+  code {{
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 9pt;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }}
+
+  /* ── Header ── */
   .header {{
     text-align: center;
     margin-bottom: 36px;
-    padding: 28px 24px;
-    background: linear-gradient(135deg, #0a1628 0%, #0f3460 50%, #533483 100%);
+    padding: 32px 28px;
+    background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 35%, #1e40af 65%, #7c3aed 100%);
     color: white;
-    border-radius: 8px;
+    border-radius: 10px;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.3);
   }}
   .header h1 {{
     color: white;
     border: none;
-    margin: 0 0 8px 0;
-    font-size: 26pt;
+    margin: 0 0 6px 0;
+    font-size: 24pt;
+    text-shadow: 0 2px 4px rgba(0,0,0,0.2);
   }}
   .header .subtitle {{
-    font-size: 14pt;
-    color: #e0e0e0;
+    font-size: 13pt;
+    color: #e0e0f0;
     margin: 4px 0;
     font-weight: 300;
-  }}
-  .header .meta {{
-    font-size: 10pt;
-    color: #b0c4de;
-    margin-top: 12px;
     letter-spacing: 0.5px;
   }}
+  .header .meta {{
+    font-size: 9pt;
+    color: #a5b4fc;
+    margin-top: 14px;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+  }}
+
+  /* ── Sentiment Charts Section ── */
+  .charts-grid {{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin: 20px 0;
+    justify-content: center;
+  }}
+  .chart-card {{
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    text-align: center;
+  }}
+  .chart-card img {{
+    max-width: 100%;
+    height: auto;
+  }}
+  .chart-card .chart-title {{
+    font-size: 9pt;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }}
+  .sentiment-kpi-row {{
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px 0;
+  }}
+  .kpi-card {{
+    flex: 1;
+    text-align: center;
+    padding: 16px 10px;
+    background: linear-gradient(135deg, #f8fafc, #eff6ff);
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+  }}
+  .kpi-card .kpi-value {{
+    font-size: 22pt;
+    font-weight: 800;
+    color: #1e40af;
+    line-height: 1;
+  }}
+  .kpi-card .kpi-label {{
+    font-size: 8pt;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-top: 6px;
+  }}
+  .kpi-card .kpi-sub {{
+    font-size: 8.5pt;
+    color: #94a3b8;
+    margin-top: 2px;
+  }}
+  .drivers-list {{
+    margin: 16px 0;
+    padding: 0;
+    list-style: none;
+  }}
+  .drivers-list li {{
+    padding: 10px 14px;
+    margin-bottom: 6px;
+    background: #f8fafc;
+    border-left: 3px solid #1e40af;
+    border-radius: 0 6px 6px 0;
+    font-size: 9.5pt;
+    color: #334155;
+  }}
+  .drivers-list li::before {{
+    content: "▸ ";
+    color: #1e40af;
+    font-weight: bold;
+  }}
+
+  /* ── Footer ── */
   .footer {{
     margin-top: 48px;
-    padding-top: 16px;
-    border-top: 2px solid #e8edf3;
+    padding: 20px 24px;
+    border-top: 2px solid #e2e8f0;
     text-align: center;
-    font-size: 8.5pt;
-    color: #888;
+    font-size: 8pt;
+    color: #94a3b8;
+    background: #f8fafc;
+    border-radius: 0 0 8px 8px;
   }}
   .footer .brand {{
-    font-weight: 600;
-    color: #0f3460;
+    font-weight: 700;
+    color: #1e40af;
     font-size: 9pt;
+    letter-spacing: 0.5px;
   }}
+
+  /* ── Print optimization ── */
+  h2 {{ page-break-before: auto; }}
+  .charts-grid, .sentiment-kpi-row {{ page-break-inside: avoid; }}
+  .chart-card {{ page-break-inside: avoid; }}
 </style>
 </head>
 <body>
 <div class="header">
   <h1>Industry News &amp; Sentiment Pulse</h1>
   <div class="subtitle">{industry} — Executive Intelligence Report</div>
-  <div class="meta">{datetime.now().strftime('%B %d, %Y')} &middot; Powered by MARS AI</div>
+  <div class="meta">{datetime.now().strftime('%B %d, %Y')} &middot; Powered by MARS AI Research Platform</div>
 </div>
 {body}
 <div class="footer">
@@ -721,3 +1105,86 @@ def _markdown_to_html(markdown_content: str, industry: str) -> str:
 </div>
 </body>
 </html>"""
+
+
+def _build_chart_html(sentiment_data: dict | None, chart_paths: dict | None) -> str:
+    """Build the HTML fragment for the sentiment dashboard with charts."""
+    if not sentiment_data:
+        return ""
+
+    overall = sentiment_data.get("overall_sentiment", {})
+    momentum = sentiment_data.get("industry_momentum", {})
+    risk = sentiment_data.get("risk_level", {})
+    invest = sentiment_data.get("investment_activity", {})
+    innov = sentiment_data.get("innovation_index", {})
+    dist = sentiment_data.get("sentiment_distribution", {})
+    confidence = sentiment_data.get("confidence_score", 65)
+    drivers = sentiment_data.get("key_drivers", [])
+    outlook = sentiment_data.get("outlook_signal", "Hold")
+
+    trend_map = {"up": "↑", "down": "↓", "stable": "→"}
+    trend_color = {"up": "#27ae60", "down": "#e74c3c", "stable": "#f39c12"}
+
+    def _trend_html(t: str) -> str:
+        arrow = trend_map.get(t, "→")
+        color = trend_color.get(t, "#f39c12")
+        return f'<span style="color:{color};font-weight:bold;font-size:14pt;">{arrow}</span>'
+
+    # KPI row
+    html = '<div class="sentiment-kpi-row">'
+    kpis = [
+        ("Overall", overall.get("label", "N/A"), overall.get("score", 50), overall.get("trend", "stable")),
+        ("Momentum", momentum.get("label", "N/A"), momentum.get("score", 50), momentum.get("trend", "stable")),
+        ("Risk", risk.get("label", "N/A"), risk.get("score", 50), risk.get("trend", "stable")),
+        ("Investment", invest.get("label", "N/A"), invest.get("score", 50), invest.get("trend", "stable")),
+        ("Innovation", innov.get("label", "N/A"), innov.get("score", 50), innov.get("trend", "stable")),
+    ]
+    for label, status, score, trend in kpis:
+        html += f'''
+        <div class="kpi-card">
+          <div class="kpi-value">{score}</div>
+          <div class="kpi-label">{label}</div>
+          <div class="kpi-sub">{status} {_trend_html(trend)}</div>
+        </div>'''
+    html += '</div>'
+
+    # Charts grid
+    if chart_paths:
+        html += '<div class="charts-grid">'
+        if "gauge" in chart_paths:
+            html += f'''
+            <div class="chart-card" style="flex:1;min-width:280px;">
+              <div class="chart-title">Overall Sentiment Gauge</div>
+              <img src="file://{chart_paths["gauge"]}" alt="Sentiment Gauge">
+            </div>'''
+        if "distribution" in chart_paths:
+            html += f'''
+            <div class="chart-card" style="flex:1;min-width:220px;">
+              <div class="chart-title">Sentiment Distribution</div>
+              <img src="file://{chart_paths["distribution"]}" alt="Sentiment Distribution">
+            </div>'''
+        html += '</div>'
+
+        if "indicators" in chart_paths:
+            html += f'''
+            <div class="chart-card" style="margin:16px 0;">
+              <div class="chart-title">Key Indicator Scores</div>
+              <img src="file://{chart_paths["indicators"]}" alt="Indicator Scores" style="max-width:100%;">
+            </div>'''
+
+        if "outlook" in chart_paths:
+            html += f'''
+            <div style="text-align:center;margin:16px 0;">
+              <img src="file://{chart_paths["outlook"]}" alt="Market Outlook" style="max-width:280px;">
+            </div>'''
+
+    # Key drivers list
+    if drivers:
+        html += '<h3>Key Sentiment Drivers</h3>'
+        html += '<ul class="drivers-list">'
+        for d in drivers[:5]:
+            import html as html_mod
+            html += f'<li>{html_mod.escape(str(d))}</li>'
+        html += '</ul>'
+
+    return html

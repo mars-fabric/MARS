@@ -794,12 +794,10 @@ async def update_rfp_stage_content(task_id: str, stage_num: int, request: RfpCon
 @router.post("/{task_id}/stages/{stage_num}/refine", response_model=RfpRefineResponse)
 async def refine_rfp_content(task_id: str, stage_num: int, request: RfpRefineRequest):
     """Use LLM to refine stage content based on user instruction."""
-    from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
+    from cmbagent.llm_provider import safe_completion
     from cmbagent.phases.rfp.token_utils import count_tokens, get_model_limits
 
     model = "gpt-4o"
-    client = create_openai_client(timeout=300)
-    refine_model = resolve_model_for_provider(model)
 
     # --- token capacity check ---
     max_ctx, _ = get_model_limits(model)
@@ -833,19 +831,19 @@ async def refine_rfp_content(task_id: str, stage_num: int, request: RfpRefineReq
         max_comp = min(16384, max(available_for_output, 4096))
 
     def _call_refine():
-        return client.chat.completions.create(
-            model=refine_model,
+        return safe_completion(
             messages=[
                 {"role": "system", "content": system_msg},
                 {"role": "user", "content": user_msg},
             ],
+            model=model,
             temperature=0.7,
-            max_completion_tokens=max_comp,
+            max_tokens=max_comp,
         )
 
-    response = await asyncio.to_thread(_call_refine)
+    refined = await asyncio.to_thread(_call_refine)
 
-    refined = response.choices[0].message.content or request.content
+    refined = refined or request.content
     return RfpRefineResponse(
         refined_content=refined,
         message="Content refined successfully",

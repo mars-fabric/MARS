@@ -31,6 +31,7 @@ class NewsPulseReportState(TypedDict):
     # ── Per-section outputs (populated by nodes) ──
     executive_summary: str
     sentiment_dashboard: str
+    sentiment_data: dict          # structured scores for chart rendering
     headlines: str
     in_depth_analysis: str
     company_analysis: str

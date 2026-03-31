@@ -1007,16 +1007,13 @@ async def refine_stage_content(task_id: str, stage_num: int, request: Deepresear
 
     try:
         def _call_llm():
-            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-
-            client = create_openai_client()
-            response = client.chat.completions.create(
-                model=resolve_model_for_provider("gpt-4o"),
+            from cmbagent.llm_provider import safe_completion
+            return safe_completion(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
+                model="gpt-4o",
                 temperature=0.7,
+                max_tokens=4096,
             )
-            return response.choices[0].message.content
 
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -1156,16 +1153,13 @@ async def refine_file_context(task_id: str, request: RefineContextRequest):
 
     try:
         def _call():
-            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-
-            client = create_openai_client()
-            response = client.chat.completions.create(
-                model=resolve_model_for_provider("gpt-4o"),
+            from cmbagent.llm_provider import safe_completion
+            return safe_completion(
                 messages=[{"role": "user", "content": prompt}],
-                max_tokens=4096,
+                model="gpt-4o",
                 temperature=0.4,
+                max_tokens=4096,
             )
-            return response.choices[0].message.content
 
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -1403,9 +1397,7 @@ async def _run_file_analysis(task_id: str, work_dir: str, buf_key: str):
                 "Sending file metadata to LLM for scientific analysis..."
             )
 
-        from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-
-        client = create_openai_client()
+        from cmbagent.llm_provider import safe_completion
 
         prompt = (
             "You are an expert research data analyst. Analyze the following research data files "
@@ -1437,13 +1429,12 @@ async def _run_file_analysis(task_id: str, work_dir: str, buf_key: str):
             "Output ONLY the data context document - no preamble, no explanation."
         )
 
-        response = client.chat.completions.create(
-            model=resolve_model_for_provider("gpt-4o"),
+        return safe_completion(
             messages=[{"role": "user", "content": prompt}],
+            model="gpt-4o",
             temperature=0.3,
             max_tokens=4000,
         )
-        return response.choices[0].message.content
 
     try:
         loop = asyncio.get_event_loop()
@@ -1670,19 +1661,16 @@ async def ai_edit_tex(task_id: str, request: AiEditTexRequest):
 
     try:
         def _call_llm():
-            from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-
-            client = create_openai_client()
-            response = client.chat.completions.create(
-                model=resolve_model_for_provider("gpt-4o"),
+            from cmbagent.llm_provider import safe_completion
+            return safe_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                max_tokens=8192,
+                model="gpt-4o",
                 temperature=0.2,
+                max_tokens=8192,
             )
-            return response.choices[0].message.content
 
         loop = asyncio.get_event_loop()
         with concurrent.futures.ThreadPoolExecutor() as executor:
