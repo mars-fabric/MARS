@@ -39,6 +39,22 @@ class RfpExecutionPhase(RfpPhaseBase):
             "testing, CI/CD, release management, and post-launch support."
         )
 
+    @property
+    def specialist_system_prompt(self) -> str:
+        return (
+            "You are a senior risk management and governance specialist with experience "
+            "in enterprise programme delivery assurance.  You will receive an execution "
+            "strategy document. Validate and enrich it:\n"
+            "1. Validate go-live strategy and rollback / back-out plans\n"
+            "2. Check risk register completeness \u2014 are probability, impact, and ownership assigned?\n"
+            "3. Verify testing strategy covers functional, performance, security, and UAT scenarios\n"
+            "4. Validate CI/CD pipeline design and release management gates\n"
+            "5. Ensure governance structure, escalation paths, and RACI matrix are clear\n"
+            "6. Check KPIs are measurable, time-bound, and aligned with business objectives\n"
+            "7. Verify post-launch support model (SLA tiers, on-call rotation, knowledge transfer)\n"
+            "Return the COMPLETE improved document \u2014 not a commentary. Output clean markdown only."
+        )
+
     def build_user_prompt(self, context: PhaseContext) -> str:
         ss = context.shared_state
         return f"""Based on the complete analysis, tools, cloud plan, implementation plan, and architecture, define the execution strategy.

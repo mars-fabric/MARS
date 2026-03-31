@@ -30,6 +30,9 @@ class RfpPhaseConfig(PhaseConfig):
     # 0 = single-shot, 1+ = generate → review → refine loop.
     n_reviews: int = 1
     review_model: Optional[str] = None  # defaults to same as model
+    # Multi-agent: enable 3-agent pipeline (primary → specialist → reviewer)
+    multi_agent: bool = True
+    specialist_model: Optional[str] = None  # override specialist model
 
 
 class RfpPhaseBase(Phase):
@@ -77,7 +80,7 @@ class RfpPhaseBase(Phase):
             "'[Insert detailed cost tables]', '[Insert glossary]', or any bracket-enclosed "
             "placeholder with ACTUAL content derived from the document's own data.  "
             "Zero placeholders are acceptable in a final document.\n"
-            "9. Ensure ALL monetary values are in USD ($) only — no INR, EUR, GBP, or mixed currencies\n"
+            "9. Ensure ALL monetary values use a single consistent currency throughout — no mixed currencies\n"
             "10. Verify every cost table has both Monthly and Annual columns with actual dollar figures in every cell — no empty cells\n"
             "11. Verify Annual Cost = Monthly Cost × 12 (fix any math errors)\n"
             "12. If the document has appendices, verify they contain REAL content (full tables, glossary entries, references) — not brief descriptions\n"
@@ -96,11 +99,58 @@ class RfpPhaseBase(Phase):
     def build_user_prompt(self, context: PhaseContext) -> str:  # pragma: no cover
         raise NotImplementedError
 
+    # ---- specialist hook (multi-agent) ----
+
+    @property
+    def specialist_system_prompt(self) -> Optional[str]:
+        """System-level instruction for the specialist agent.
+
+        Override in subclasses to enable the specialist validation pass
+        in multi-agent mode.  Return ``None`` to skip.
+        """
+        return None
+
+    # ---- currency helper ----
+
+    @staticmethod
+    def get_currency_rule(context: PhaseContext) -> str:
+        """Return a currency instruction derived from the requirements analysis.
+
+        Scans the stage-1 output for the ## Currency section.  If found, uses
+        that currency for all cost tables.  Otherwise defaults to USD ($).
+        """
+        import re
+        reqs = context.shared_state.get("requirements_analysis", "")
+        # Look for: **Primary Currency:** USD ($)  or similar
+        m = re.search(
+            r"\*\*Primary Currency:\*\*\s*([A-Z]{3})\s*\(([^)]+)\)",
+            reqs,
+        )
+        if m:
+            code, symbol = m.group(1), m.group(2)
+        else:
+            code, symbol = "USD", "$"
+        return (
+            f"CURRENCY RULE: ALL monetary values in the ENTIRE document MUST be "
+            f"in {code} ({symbol}) only. NEVER mix currencies. Every cost figure "
+            f"must use the {symbol} symbol with {code} amounts.\n"
+            f"COST TABLE FORMAT: Every cost table MUST have both Monthly Cost "
+            f"({code}) and Annual Cost ({code}) columns with actual figures. "
+            f"Annual = Monthly × 12. Never leave cost cells empty. "
+            f"Format: {symbol}X,XXX with comma separators. "
+            f"Every cost table MUST end with a **Total** row."
+        )
+
     # ---- execution ----
 
     async def execute(self, context: PhaseContext) -> PhaseResult:
-        """Run generate pass, then optional review pass(es)."""
+        """Run generate pass (with auto-chunking if needed), then optional review pass(es)."""
         from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
+        from cmbagent.phases.rfp.token_utils import (
+            get_model_limits,
+            count_tokens,
+            chunk_prompt_if_needed,
+        )
 
         self._status = PhaseStatus.RUNNING
         start = time.time()
@@ -109,57 +159,212 @@ class RfpPhaseBase(Phase):
             client = create_openai_client(timeout=300)
             model = self.config.model
             resolved = resolve_model_for_provider(model)
-            review_model = resolve_model_for_provider(self.config.review_model or model)
+            _review_model_name = self.config.review_model or model
+            review_model = resolve_model_for_provider(_review_model_name)
+
+            # --- multi-agent model overrides ---
+            if self.config.multi_agent:
+                from cmbagent.phases.rfp.agent_teams import get_phase_models
+                _agent_models = get_phase_models(self.phase_type)
+                model = _agent_models.get("primary", model)
+                resolved = resolve_model_for_provider(model)
+                _review_model_name = _agent_models.get("reviewer", _review_model_name)
+                review_model = resolve_model_for_provider(_review_model_name)
+                _spec_model = self.config.specialist_model or _agent_models.get("specialist", "gpt-4.1-mini")
+                print(f"[{self.display_name}] Multi-agent: primary={model}, specialist={_spec_model}, reviewer={_review_model_name}")
 
             # Reasoning models (o3-*, o1-*) do not support the temperature param
             _is_reasoning = any(model.startswith(p) for p in ("o3", "o1"))
-            _is_review_reasoning = any((self.config.review_model or model).startswith(p) for p in ("o3", "o1"))
+            _is_review_reasoning = any(_review_model_name.startswith(p) for p in ("o3", "o1"))
 
             user_prompt = self.build_user_prompt(context)
 
-            # --- generation pass ---
-            print(f"[{self.display_name}] Sending generation request to {model}...")
-            def _gen():
-                params: dict = {
-                    "model": resolved,
-                    "messages": [
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    "max_completion_tokens": self.config.max_completion_tokens,
-                }
-                if not _is_reasoning:
-                    params["temperature"] = self.config.temperature
-                return client.chat.completions.create(**params)
+            # --- token capacity check ---
+            max_ctx, max_out = get_model_limits(model)
+            print(f"[{self.display_name}] Model {model}: context={max_ctx:,} tokens, max_output={max_out:,} tokens")
 
-            gen_resp = await asyncio.to_thread(_gen)
-            content = gen_resp.choices[0].message.content or ""
-            print(f"[{self.display_name}] Generation complete ({len(content)} chars)")
+            chunks = chunk_prompt_if_needed(
+                system_prompt=self.system_prompt,
+                user_prompt=user_prompt,
+                model=model,
+                max_completion_tokens=self.config.max_completion_tokens,
+                safety_margin=0.75,
+            )
 
-            total_prompt = (gen_resp.usage.prompt_tokens if gen_resp.usage else 0)
-            total_completion = (gen_resp.usage.completion_tokens if gen_resp.usage else 0)
+            total_prompt = 0
+            total_completion = 0
+
+            if chunks is None:
+                # --- single-shot generation pass (prompt fits within limits) ---
+                prompt_tokens = count_tokens(self.system_prompt + user_prompt, model)
+                # Dynamically cap output tokens so prompt+output never exceeds context
+                available_for_output = max_ctx - prompt_tokens - 200
+                gen_max_tokens = min(self.config.max_completion_tokens, max(available_for_output, 4096))
+                if gen_max_tokens < self.config.max_completion_tokens:
+                    print(f"[{self.display_name}] Capping max_completion_tokens: {self.config.max_completion_tokens} → {gen_max_tokens} (prompt={prompt_tokens:,})")
+                print(f"[{self.display_name}] Prompt fits within capacity ({prompt_tokens:,} tokens). Sending generation request to {model}...")
+
+                def _gen():
+                    params: dict = {
+                        "model": resolved,
+                        "messages": [
+                            {"role": "system", "content": self.system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "max_completion_tokens": gen_max_tokens,
+                    }
+                    if not _is_reasoning:
+                        params["temperature"] = self.config.temperature
+                    return client.chat.completions.create(**params)
+
+                gen_resp = await asyncio.to_thread(_gen)
+                content = gen_resp.choices[0].message.content or ""
+                finish_reason = gen_resp.choices[0].finish_reason
+                print(f"[{self.display_name}] Generation complete ({len(content)} chars, finish_reason={finish_reason})")
+                total_prompt += (gen_resp.usage.prompt_tokens if gen_resp.usage else 0)
+                total_completion += (gen_resp.usage.completion_tokens if gen_resp.usage else 0)
+            else:
+                # --- chunked generation (prompt exceeds model capacity) ---
+                print(f"[{self.display_name}] Prompt exceeds capacity — splitting into {len(chunks)} sub-requests...")
+                partial_outputs: list[str] = []
+
+                for idx, chunk in enumerate(chunks, 1):
+                    chunk_tokens = count_tokens(chunk, model)
+                    print(f"[{self.display_name}] Chunk {idx}/{len(chunks)} ({chunk_tokens:,} tokens)...")
+
+                    # Provide context about which chunk this is so the LLM
+                    # generates the right portion of the document.
+                    if len(chunks) > 1:
+                        chunk_instruction = (
+                            f"\n\n---\n**NOTE:** This is part {idx} of {len(chunks)} of the source material. "
+                            f"Generate the proposal sections that correspond to THIS portion of the source data. "
+                            f"{'Continue from where the previous part left off. ' if idx > 1 else ''}"
+                            f"Do NOT repeat content from earlier parts.\n"
+                        )
+                    else:
+                        chunk_instruction = ""
+
+                    def _gen_chunk(c=chunk, ci=chunk_instruction):
+                        # Cap output tokens to fit within context
+                        ck_prompt_tokens = count_tokens(self.system_prompt + c + ci, model) + 6
+                        ck_available = max_ctx - ck_prompt_tokens - 200
+                        ck_max = min(self.config.max_completion_tokens, max(ck_available, 4096))
+                        params: dict = {
+                            "model": resolved,
+                            "messages": [
+                                {"role": "system", "content": self.system_prompt},
+                                {"role": "user", "content": c + ci},
+                            ],
+                            "max_completion_tokens": ck_max,
+                        }
+                        if not _is_reasoning:
+                            params["temperature"] = self.config.temperature
+                        return client.chat.completions.create(**params)
+
+                    resp = await asyncio.to_thread(_gen_chunk)
+                    part = resp.choices[0].message.content or ""
+                    partial_outputs.append(part)
+                    print(f"[{self.display_name}] Chunk {idx} complete ({len(part)} chars)")
+                    total_prompt += (resp.usage.prompt_tokens if resp.usage else 0)
+                    total_completion += (resp.usage.completion_tokens if resp.usage else 0)
+
+                # Combine all partial outputs
+                content = "\n\n".join(partial_outputs)
+                print(f"[{self.display_name}] All chunks combined ({len(content)} chars total)")
+
+            # --- guard: skip review if generation produced nothing ---
+            if not content or len(content) < 100:
+                raise RuntimeError(
+                    f"Generation produced insufficient content ({len(content)} chars). "
+                    f"The model may have hit context limits or returned an empty response. "
+                    f"Try using a model with a larger context window (e.g., gpt-4.1)."
+                )
+
+            # --- specialist pass (multi-agent) ---
+            if self.config.multi_agent and self.specialist_system_prompt:
+                content, _sp_tok, _sc_tok = await self._run_specialist(
+                    client, content, context,
+                )
+                total_prompt += _sp_tok
+                total_completion += _sc_tok
 
             # --- review passes ---
             for i in range(self.config.n_reviews):
                 print(f"[{self.display_name}] Running review pass {i + 1}/{self.config.n_reviews}...")
-                def _review(draft=content):
-                    params: dict = {
-                        "model": review_model,
-                        "messages": [
-                            {"role": "system", "content": self.review_system_prompt},
-                            {"role": "user", "content": f"Draft document:\n\n{draft}"},
-                        ],
-                        "max_completion_tokens": self.config.max_completion_tokens,
-                    }
-                    if not _is_review_reasoning:
-                        params["temperature"] = self.config.temperature
-                    return client.chat.completions.create(**params)
 
-                rev_resp = await asyncio.to_thread(_review)
-                content = rev_resp.choices[0].message.content or content
-                print(f"[{self.display_name}] Review pass complete ({len(content)} chars)")
-                total_prompt += (rev_resp.usage.prompt_tokens if rev_resp.usage else 0)
-                total_completion += (rev_resp.usage.completion_tokens if rev_resp.usage else 0)
+                # Check if the review prompt also needs chunking
+                review_prompt = f"Draft document:\n\n{content}"
+                review_chunks = chunk_prompt_if_needed(
+                    system_prompt=self.review_system_prompt,
+                    user_prompt=review_prompt,
+                    model=self.config.review_model or model,
+                    max_completion_tokens=self.config.max_completion_tokens,
+                    safety_margin=0.75,
+                )
+
+                if review_chunks is None:
+                    # Single-shot review — cap output tokens
+                    rev_prompt_tokens = count_tokens(self.review_system_prompt + review_prompt, self.config.review_model or model) + 6
+                    rev_available = max_ctx - rev_prompt_tokens - 200
+                    rev_max_tokens = min(self.config.max_completion_tokens, max(rev_available, 4096))
+                    if rev_max_tokens < self.config.max_completion_tokens:
+                        print(f"[{self.display_name}] Review: capping max_completion_tokens {self.config.max_completion_tokens} → {rev_max_tokens}")
+
+                    def _review(draft=content, _rmt=rev_max_tokens):
+                        params: dict = {
+                            "model": review_model,
+                            "messages": [
+                                {"role": "system", "content": self.review_system_prompt},
+                                {"role": "user", "content": f"Draft document:\n\n{draft}"},
+                            ],
+                            "max_completion_tokens": _rmt,
+                        }
+                        if not _is_review_reasoning:
+                            params["temperature"] = self.config.temperature
+                        return client.chat.completions.create(**params)
+
+                    rev_resp = await asyncio.to_thread(_review)
+                    reviewed = rev_resp.choices[0].message.content or ""
+                    # Only accept review if it produced substantial content
+                    # (reject if reviewer returned meta-commentary instead of improved doc)
+                    if reviewed and len(reviewed) > len(content) * 0.3:
+                        content = reviewed
+                    else:
+                        print(f"[{self.display_name}] Review output too short ({len(reviewed)} chars vs {len(content)}) — keeping original")
+                    total_prompt += (rev_resp.usage.prompt_tokens if rev_resp.usage else 0)
+                    total_completion += (rev_resp.usage.completion_tokens if rev_resp.usage else 0)
+                else:
+                    # Chunked review
+                    print(f"[{self.display_name}] Review draft exceeds capacity — splitting into {len(review_chunks)} sub-reviews...")
+                    reviewed_parts: list[str] = []
+                    for ridx, rchunk in enumerate(review_chunks, 1):
+                        print(f"[{self.display_name}] Review chunk {ridx}/{len(review_chunks)}...")
+
+                        def _review_chunk(rc=rchunk):
+                            # Cap output tokens for this review chunk
+                            rc_prompt_tok = count_tokens(self.review_system_prompt + rc, self.config.review_model or model) + 20
+                            rc_avail = max_ctx - rc_prompt_tok - 200
+                            rc_max = min(self.config.max_completion_tokens, max(rc_avail, 4096))
+                            params: dict = {
+                                "model": review_model,
+                                "messages": [
+                                    {"role": "system", "content": self.review_system_prompt},
+                                    {"role": "user", "content": f"Draft document (part {ridx}/{len(review_chunks)}):\n\n{rc}"},
+                                ],
+                                "max_completion_tokens": rc_max,
+                            }
+                            if not _is_review_reasoning:
+                                params["temperature"] = self.config.temperature
+                            return client.chat.completions.create(**params)
+
+                        rresp = await asyncio.to_thread(_review_chunk)
+                        reviewed_parts.append(rresp.choices[0].message.content or rchunk)
+                        total_prompt += (rresp.usage.prompt_tokens if rresp.usage else 0)
+                        total_completion += (rresp.usage.completion_tokens if rresp.usage else 0)
+
+                    content = "\n\n".join(reviewed_parts)
+
+                print(f"[{self.display_name}] Review pass {i + 1} complete ({len(content)} chars)")
 
             # --- save to disk ---
             if self.output_filename:
@@ -202,3 +407,115 @@ class RfpPhaseBase(Phase):
         if not context.task:
             errors.append("task (RFP content) is required")
         return errors
+
+    # ---- multi-agent: specialist pass ----
+
+    async def _run_specialist(
+        self, client, content: str, context: PhaseContext,
+    ) -> tuple:
+        """Run specialist agent to validate and enrich *content*.
+
+        Uses the specialist model from ``PHASE_AGENT_MODELS`` (or
+        ``config.specialist_model`` override) with full token safety.
+
+        Returns:
+            ``(content, prompt_tokens, completion_tokens)``
+        """
+        from cmbagent.llm_provider import resolve_model_for_provider
+        from cmbagent.phases.rfp.token_utils import (
+            get_model_limits, count_tokens, chunk_prompt_if_needed,
+        )
+        from cmbagent.phases.rfp.agent_teams import get_phase_models
+
+        spec_prompt = self.specialist_system_prompt
+        if not spec_prompt:
+            return content, 0, 0
+
+        models = get_phase_models(self.phase_type)
+        spec_model = self.config.specialist_model or models.get("specialist", "gpt-4.1-mini")
+        resolved_spec = resolve_model_for_provider(spec_model)
+        _is_reasoning = any(spec_model.startswith(p) for p in ("o3", "o1"))
+
+        max_ctx, _ = get_model_limits(spec_model)
+        spec_user = f"Document to validate and improve:\n\n{content}"
+
+        print(f"[{self.display_name}] Specialist agent ({spec_model}) validating content...")
+
+        spec_chunks = chunk_prompt_if_needed(
+            system_prompt=spec_prompt,
+            user_prompt=spec_user,
+            model=spec_model,
+            max_completion_tokens=self.config.max_completion_tokens,
+            safety_margin=0.75,
+        )
+
+        sp_total = 0
+        sc_total = 0
+
+        if spec_chunks is None:
+            # ---- single-shot specialist ----
+            prompt_tok = count_tokens(spec_prompt + spec_user, spec_model) + 6
+            available = max_ctx - prompt_tok - 200
+            spec_max = min(self.config.max_completion_tokens, max(available, 4096))
+            if spec_max < self.config.max_completion_tokens:
+                print(f"[{self.display_name}] Specialist: capping max_completion_tokens "
+                      f"{self.config.max_completion_tokens} → {spec_max}")
+
+            def _spec():
+                params: dict = {
+                    "model": resolved_spec,
+                    "messages": [
+                        {"role": "system", "content": spec_prompt},
+                        {"role": "user", "content": spec_user},
+                    ],
+                    "max_completion_tokens": spec_max,
+                }
+                if not _is_reasoning:
+                    params["temperature"] = self.config.temperature
+                return client.chat.completions.create(**params)
+
+            resp = await asyncio.to_thread(_spec)
+            enriched = resp.choices[0].message.content or ""
+            sp_total += (resp.usage.prompt_tokens if resp.usage else 0)
+            sc_total += (resp.usage.completion_tokens if resp.usage else 0)
+
+            if enriched and len(enriched) > len(content) * 0.3:
+                content = enriched
+                print(f"[{self.display_name}] Specialist pass complete ({len(content)} chars)")
+            else:
+                print(f"[{self.display_name}] Specialist output too short "
+                      f"({len(enriched)} chars vs {len(content)}) — keeping original")
+        else:
+            # ---- chunked specialist ----
+            print(f"[{self.display_name}] Specialist content exceeds capacity — "
+                  f"splitting into {len(spec_chunks)} sub-calls...")
+            enriched_parts: list[str] = []
+            for sidx, schunk in enumerate(spec_chunks, 1):
+                def _spec_chunk(sc=schunk, si=sidx, total=len(spec_chunks)):
+                    tok = count_tokens(spec_prompt + sc, spec_model) + 20
+                    avail = max_ctx - tok - 200
+                    cap = min(self.config.max_completion_tokens, max(avail, 4096))
+                    params: dict = {
+                        "model": resolved_spec,
+                        "messages": [
+                            {"role": "system", "content": spec_prompt},
+                            {"role": "user", "content": (
+                                f"Document section (part {si}/{total}) to validate "
+                                f"and improve:\n\n{sc}"
+                            )},
+                        ],
+                        "max_completion_tokens": cap,
+                    }
+                    if not _is_reasoning:
+                        params["temperature"] = self.config.temperature
+                    return client.chat.completions.create(**params)
+
+                resp = await asyncio.to_thread(_spec_chunk)
+                enriched_parts.append(resp.choices[0].message.content or schunk)
+                sp_total += (resp.usage.prompt_tokens if resp.usage else 0)
+                sc_total += (resp.usage.completion_tokens if resp.usage else 0)
+
+            content = "\n\n".join(enriched_parts)
+            print(f"[{self.display_name}] Chunked specialist pass complete ({len(content)} chars)")
+
+        return content, sp_total, sc_total

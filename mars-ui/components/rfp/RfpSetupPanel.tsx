@@ -23,6 +23,7 @@ export default function RfpSetupPanel({ hook, onNext }: RfpSetupPanelProps) {
 
     const [rfpText, setRfpText] = useState('')
     const [rfpContext, setRfpContext] = useState('')
+    const [submitted, setSubmitted] = useState(false)
 
     // Auto-populate the textarea when PDF text is extracted from an upload
     useEffect(() => {
@@ -33,10 +34,11 @@ export default function RfpSetupPanel({ hook, onNext }: RfpSetupPanelProps) {
 
     const hasContent = rfpText.trim().length > 0
     const hasFiles = uploadedFiles.some(f => f.status === 'done')
-    const canSubmit = (hasContent || hasFiles) && !isLoading
+    const canSubmit = (hasContent || hasFiles) && !isLoading && !submitted
 
     const handleSubmit = useCallback(async () => {
         if (!canSubmit) return
+        setSubmitted(true)
         // Use extracted/typed text, or a placeholder noting files are the source
         const taskText = rfpText.trim() || '(See uploaded RFP documents)'
         const id = await createTask(taskText, rfpContext || undefined)

@@ -41,6 +41,22 @@ class RfpCloudPhase(RfpPhaseBase):
             "matrices, and clear justifications for every architectural decision."
         )
 
+    @property
+    def specialist_system_prompt(self) -> str:
+        return (
+            "You are a cloud cost optimization specialist and FinOps practitioner with deep "
+            "expertise across AWS, Azure, and GCP pricing models.  You will receive a cloud "
+            "infrastructure plan. Validate and enrich it:\n"
+            "1. Validate cost estimates against current cloud provider pricing (reserved, on-demand, spot)\n"
+            "2. Identify cost optimization opportunities \u2014 right-sizing, savings plans, committed use\n"
+            "3. Verify the provider comparison is fair and uses equivalent service tiers\n"
+            "4. Check for missing services or architectural gaps (CDN, WAF, secrets manager)\n"
+            "5. Validate disaster recovery design \u2014 RPO/RTO targets, multi-region failover\n"
+            "6. Ensure security architecture follows cloud provider best practices (landing zones, IAM)\n"
+            "7. Verify all cost tables have Monthly + Annual columns with correct math\n"
+            "Return the COMPLETE improved document \u2014 not a commentary. Output clean markdown only."
+        )
+
     def build_user_prompt(self, context: PhaseContext) -> str:
         reqs = context.shared_state.get("requirements_analysis", "(Not yet generated)")
         tools = context.shared_state.get("tools_technology", "(Not yet generated)")
@@ -100,8 +116,6 @@ For EACH provider that was NOT chosen, provide a dedicated subsection explaining
 ## 12. Cost Optimization Strategy — Reserved instances, savings plans, spot/preemptible instances, right-sizing
 ## 13. Utilization Projections — Expected usage patterns, scaling triggers, capacity planning for 1/2/3 years
 
-CURRENCY RULE: ALL costs MUST be in USD ($) only. NEVER use INR (₹), EUR (€), GBP (£), or any other currency anywhere in the document. Every monetary value must use the $ symbol with USD amounts. If you need to convert from another currency, do the conversion and show only the USD result.
-
-COST TABLE FORMAT: Every cost table MUST have both Monthly Cost (USD) and Annual Cost (USD) columns with actual dollar figures in every cell. Annual = Monthly × 12. Never leave any cost cell empty. Format amounts as $X,XXX with comma separators. Every table must have a Total row.
+{self.get_currency_rule(context)}
 
 Produce a detailed markdown document with cost tables."""

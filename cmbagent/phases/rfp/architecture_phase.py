@@ -39,6 +39,22 @@ class RfpArchitecturePhase(RfpPhaseBase):
             "Architecture Decision Records."
         )
 
+    @property
+    def specialist_system_prompt(self) -> str:
+        return (
+            "You are a principal software engineer specialising in system scalability, "
+            "performance, and implementation feasibility.  You will receive an architecture "
+            "design document. Validate and enrich it:\n"
+            "1. Validate component boundaries and interface definitions for clear separation of concerns\n"
+            "2. Check for scalability bottlenecks and single points of failure\n"
+            "3. Verify data architecture supports the required access patterns and query volumes\n"
+            "4. Validate integration patterns and API design (REST, gRPC, event-driven)\n"
+            "5. Review security architecture for defence-in-depth (network, application, data layers)\n"
+            "6. Ensure ADRs are well-reasoned with proper trade-off analysis and alternatives considered\n"
+            "7. Check monitoring and observability design covers all critical paths\n"
+            "Return the COMPLETE improved document \u2014 not a commentary. Output clean markdown only."
+        )
+
     def build_user_prompt(self, context: PhaseContext) -> str:
         ss = context.shared_state
         return f"""Based on all previous analysis and planning, design the complete system architecture.

@@ -795,18 +795,52 @@ async def update_rfp_stage_content(task_id: str, stage_num: int, request: RfpCon
 async def refine_rfp_content(task_id: str, stage_num: int, request: RfpRefineRequest):
     """Use LLM to refine stage content based on user instruction."""
     from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
-    client = create_openai_client()
-    refine_model = resolve_model_for_provider("gpt-4o")
+    from cmbagent.phases.rfp.token_utils import count_tokens, get_model_limits
+
+    model = "gpt-4o"
+    client = create_openai_client(timeout=300)
+    refine_model = resolve_model_for_provider(model)
+
+    # --- token capacity check ---
+    max_ctx, _ = get_model_limits(model)
+    system_msg = "You are a technical proposal consultant. Refine the following content based on the user's instruction. Return ONLY the refined markdown content, no explanations."
+    user_msg = f"Current content:\n\n{request.content}\n\n---\n\nInstruction: {request.message}"
+
+    prompt_tokens = count_tokens(system_msg, model) + count_tokens(user_msg, model) + 6
+    available_for_output = max_ctx - prompt_tokens - 200
+    max_comp = min(16384, max(available_for_output, 4096))
+
+    # If content is too large, trim the content passed to refine but keep
+    # the user instruction intact.  This avoids a context overflow crash.
+    usable_for_content = int(max_ctx * 0.75) - count_tokens(system_msg, model) - count_tokens(request.message, model) - max_comp - 200
+    content_tokens = count_tokens(request.content, model)
+
+    if content_tokens > usable_for_content and usable_for_content > 2000:
+        # Truncate content to fit — take start + end to preserve context
+        import tiktoken
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(request.content)
+        half = usable_for_content // 2
+        trimmed_tokens = tokens[:half] + tokens[-half:]
+        trimmed_content = enc.decode(trimmed_tokens)
+        user_msg = f"Current content:\n\n{trimmed_content}\n\n---\n\nInstruction: {request.message}"
+        # Recalculate
+        prompt_tokens = count_tokens(system_msg, model) + count_tokens(user_msg, model) + 6
+        available_for_output = max_ctx - prompt_tokens - 200
+        max_comp = min(16384, max(available_for_output, 4096))
 
     def _call_refine():
         return client.chat.completions.create(
             model=refine_model,
             messages=[
-                {"role": "system", "content": "You are a technical proposal consultant. Refine the following content based on the user's instruction. Return ONLY the refined markdown content, no explanations."},
-                {"role": "user", "content": f"Current content:\n\n{request.content}\n\n---\n\nInstruction: {request.message}"},
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
             ],
             temperature=0.7,
-            max_completion_tokens=16384,
+            max_completion_tokens=max_comp,
         )
 
     response = await asyncio.to_thread(_call_refine)
@@ -895,8 +929,11 @@ async def download_rfp_artifact(task_id: str, filename: str):
 
 
 @router.get("/{task_id}/download-pdf")
-async def download_rfp_pdf(task_id: str):
-    """Generate and download the final proposal as a professional PDF."""
+async def download_rfp_pdf(task_id: str, inline: bool = False):
+    """Generate and download the final proposal as a professional PDF.
+    
+    Pass ?inline=true to serve for in-browser preview (Content-Disposition: inline).
+    """
     db = _get_db()
     try:
         session_id = _get_session_id_for_task(task_id, db)
@@ -937,6 +974,7 @@ async def download_rfp_pdf(task_id: str):
     font-size: 11pt;
     line-height: 1.6;
     color: #222;
+    background-color: #ffffff;
   }}
   h1 {{ color: #1a365d; border-bottom: 2px solid #1a365d; padding-bottom: 8px; page-break-after: avoid; }}
   h2 {{ color: #2c5282; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; margin-top: 1.5em; page-break-after: avoid; }}
@@ -960,10 +998,11 @@ async def download_rfp_pdf(task_id: str):
 
         HTML(string=full_html).write_pdf(pdf_path)
 
+        disposition = 'inline; filename="RFP_Proposal.pdf"' if inline else 'attachment; filename="RFP_Proposal.pdf"'
         return FileResponse(
             pdf_path,
             media_type="application/pdf",
-            headers={"Content-Disposition": 'attachment; filename="RFP_Proposal.pdf"'},
+            headers={"Content-Disposition": disposition},
         )
     finally:
         db.close()

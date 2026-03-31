@@ -41,7 +41,22 @@ class RfpToolsPhase(RfpPhaseBase):
             "that respect the client's stated budget.  You never recommend a tool without "
             "comparing it against at least 2–3 alternatives and explaining why it wins."
         )
-
+    @property
+    def specialist_system_prompt(self) -> str:
+        return (
+            "You are a senior security auditor and compliance specialist with expertise "
+            "in enterprise software supply chains.  You will receive a tools & technology "
+            "selection document. Validate and enrich it:\n"
+            "1. Verify security assessments for each tool \u2014 CVE history accuracy, "
+            "compliance certifications (SOC 2, ISO 27001, FedRAMP)\n"
+            "2. Check encryption capabilities (at-rest, in-transit, key management)\n"
+            "3. Identify supply chain risks and vendor lock-in concerns\n"
+            "4. Validate license types and cost estimates against current market pricing\n"
+            "5. Ensure comparison tables are fair \u2014 same criteria across all alternatives\n"
+            "6. Add missing security considerations (OWASP, NIST, data residency)\n"
+            "7. Verify cost calculations (Monthly \u00d7 12 = Annual)\n"
+            "Return the COMPLETE improved document \u2014 not a commentary. Output clean markdown only."
+        )
     def build_user_prompt(self, context: PhaseContext) -> str:
         reqs = context.shared_state.get("requirements_analysis", "(Not yet generated)")
         return f"""Based on the following requirements analysis, recommend the complete set of tools and technologies needed.
@@ -95,8 +110,6 @@ If total exceeds budget, flag it and suggest cost-reduction alternatives.
 - Where can open-source alternatives save money?
 - Volume discount or enterprise agreement opportunities
 
-CURRENCY RULE: ALL costs MUST be in USD ($) only. NEVER use INR, EUR, GBP, or any other currency. Every cost figure must use the $ symbol.
-
-COST TABLE FORMAT: Every cost table MUST have both Monthly and Annual columns with actual dollar values. Annual = Monthly × 12. Never leave cost cells empty. Format: $X,XXX.
+{self.get_currency_rule(context)}
 
 Produce a detailed markdown document with comparison tables for every tool category."""

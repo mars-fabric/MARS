@@ -17,8 +17,13 @@
 13. [Task Resumption](#13-task-resumption)
 14. [Cost Tracking](#14-cost-tracking)
 15. [Configuration & Model Defaults](#15-configuration--model-defaults)
-16. [End-to-End User Flow](#16-end-to-end-user-flow)
-17. [Error Handling](#17-error-handling)
+16. [Token Capacity Management](#16-token-capacity-management)
+17. [Dynamic Currency System](#17-dynamic-currency-system)
+18. [Divide-and-Accumulate Strategy (Stage 7)](#18-divide-and-accumulate-strategy-stage-7)
+19. [Refinement Chat Token Safety](#19-refinement-chat-token-safety)
+20. [End-to-End User Flow](#20-end-to-end-user-flow)
+21. [Error Handling](#21-error-handling)
+22. [Multi-Agent System](#22-multi-agent-system)
 
 ---
 
@@ -28,14 +33,14 @@ The RFP Proposal Generator is a **7-stage, human-in-the-loop AI workflow** in MA
 
 1. **Requirements Analysis** → 2. **Tools & Technology** → 3. **Cloud & Infrastructure** → 4. **Implementation Plan** → 5. **Architecture Design** → 6. **Execution Strategy** → 7. **Proposal Compilation**
 
-Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **generate → review** cycle (2 LLM calls per stage by default). Users can review, edit, and refine AI output between every stage.
+Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **3-agent pipeline** (Primary → Specialist → Reviewer: 3 LLM calls per stage when `multi_agent=True`, the default). Users can review, edit, and refine AI output between every stage.
 
 **Key technologies:**
 - **Backend:** Python, FastAPI, SQLAlchemy, asyncio
-- **Phase System:** `RfpPhaseBase` → 7 phase subclasses with generate→review cycles
+- **Phase System:** `RfpPhaseBase` → 7 phase subclasses with 3-agent pipeline (primary → specialist → reviewer)
 - **Frontend:** React, TypeScript, Next.js
 - **Real-time:** WebSocket + REST polling
-- **Default LLM:** GPT-5.3 (configurable per stage via `STAGE_MODEL_MAP`)
+- **Default LLM:** GPT-4.1 / GPT-5.3 (per-stage via `PHASE_AGENT_MODELS` in `agent_teams.py`)
 - **Mode:** `"rfp-proposal"`
 
 ---
@@ -158,6 +163,7 @@ cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
 7. Assumptions
 8. Deliverables
 9. Budget Analysis (critical for downstream cost-aware stages)
+10. **Currency** — Identifies the currency used in the RFP (USD, EUR, GBP, INR, etc.) by scanning for currency symbols, codes, or country context. Outputs `## Currency` section with `**Primary Currency:** <CODE> (<SYMBOL>)`. Defaults to USD ($) if not found. This currency is used by all downstream stages (see [Section 17](#17-dynamic-currency-system)).
 
 **Input:** `rfp_content` (user's RFP text) + `rfp_context` (optional) + uploaded file content
 **Output:** `shared_state.requirements_analysis` → `requirements.md`
@@ -169,7 +175,7 @@ cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
 **What it produces:**
 - Head-to-head **comparison table** per tool category (Recommended vs Alternatives)
 - **Security assessment** per tool (CVE history, compliance certs, encryption)
-- Cost estimates (Monthly + Annual, USD only)
+- Cost estimates (Monthly + Annual, in the RFP's detected currency)
 - Security Summary Matrix across all tools
 - Total Tool Cost Summary
 - Cost Optimization Recommendations
@@ -232,6 +238,11 @@ cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
 - Terms & Assumptions
 - **Appendices:** Detailed cost breakdowns, technology evaluation matrices, glossary (20-30+ entries), references (10-15+ citations)
 
+**Execution Strategy:** Uses a **divide-and-accumulate** approach for zero data loss (see [Section 18](#18-divide-and-accumulate-strategy-stage-7)):
+- **PATH A:** If all 6 sources fit the context window → single generation call
+- **PATH A → B fallback:** If PATH A returns empty/short output (tiktoken undercount) → automatically falls back to PATH B
+- **PATH B:** Divide sources into groups via `group_sources_by_budget()` → generate partial proposals per group → accumulation pass to merge
+
 **Input:** All 6 prior shared_state keys
 **Output:** `proposal.md` (final compiled proposal)
 
@@ -291,22 +302,28 @@ RfpPhaseBase.execute(context)
         }
 ```
 
-**Default config:** model=`gpt-4o`, temperature=`0.7`, max_completion_tokens=`16384`, n_reviews=`1`
+**Default config:** model=`gpt-4o`, temperature=`0.7`, max_completion_tokens=`16384`, n_reviews=`1`, multi_agent=`True`
 
-With `n_reviews=1`, each stage makes **2 LLM calls** (1 generate + 1 review). Total for 7 stages: **14 LLM calls**.
+With `multi_agent=True` and `n_reviews=1`, each stage makes **3 LLM calls** (1 primary + 1 specialist + 1 review). Total for 7 stages: **21 LLM calls**. Set `multi_agent=False` for the original 2-call generate→review cycle (14 calls).
+
+**Token capacity:** Before each LLM call, token count is checked against the model's max context window. If the prompt exceeds capacity, it is automatically split at section boundaries into multiple sub-requests (see [Section 16: Token Capacity Management](#16-token-capacity-management)).
 
 ### Review System Prompt
 
-The shared review prompt (in `RfpPhaseBase`) enforces:
-1. Fix factual errors, strengthen weak sections
-2. Ensure all cost figures are present and consistent
-3. Verify comparison tables for every tool/technology
-4. Verify security comparisons for major tools and services
-5. Replace ALL placeholder text (`[Insert ...]`) with actual content
-6. Ensure USD-only currency
-7. Verify cost tables have Monthly + Annual columns (Annual = Monthly × 12)
-8. Verify appendices contain real content (not just descriptions)
-9. Polish to enterprise-quality prose
+The shared review prompt (in `RfpPhaseBase`) enforces a **13-point quality checklist**:
+1. Fix factual errors, strengthen weak sections, add missing detail
+2. Improve structure and flow, ensure proper section numbering
+3. Ensure ALL cost figures are present, consistent, and fit within budget
+4. Verify every tool/technology has a comparison table vs alternatives
+5. Verify security comparisons for each major tool and service
+6. Verify cloud provider comparison and justification are thorough
+7. Add professional tables where data is listed as bullets
+8. Replace ALL placeholder text (`[Insert ...]`, `[To be added]`) with ACTUAL content
+9. Ensure ALL monetary values use a **single consistent currency** throughout — no mixed currencies (currency is determined dynamically from the RFP; see [Section 17](#17-dynamic-currency-system))
+10. Verify every cost table has Monthly and Annual columns with actual figures
+11. Verify Annual Cost = Monthly Cost × 12 (fix math errors)
+12. Verify appendices contain REAL content (full tables, glossary, references)
+13. Polish to enterprise-quality prose
 
 ### Dynamic Phase Loading
 
@@ -497,19 +514,21 @@ Source: `cmbagent/phases/rfp/`
 
 ### Phase Properties
 
-| Stage | Phase Class | phase_type | shared_output_key | output_filename | System Prompt Persona |
-|-------|-------------|------------|-------------------|-----------------|-----------------------|
-| 1 | `RfpRequirementsPhase` | `rfp_requirements` | `requirements_analysis` | `requirements.md` | Expert Business Analyst (15+ years) |
-| 2 | `RfpToolsPhase` | `rfp_tools` | `tools_technology` | `tools.md` | Senior Solutions Architect & Technology Evaluator (20+ years) |
-| 3 | `RfpCloudPhase` | `rfp_cloud` | `cloud_infrastructure` | `cloud.md` | Cloud Infrastructure Architect (20+ years, AWS/Azure/GCP) |
-| 4 | `RfpImplementationPhase` | `rfp_implementation` | `implementation_plan` | `implementation.md` | Senior Project Manager & Delivery Lead |
-| 5 | `RfpArchitecturePhase` | `rfp_architecture` | `architecture_design` | `architecture.md` | Principal System Architect |
-| 6 | `RfpExecutionPhase` | `rfp_execution` | `execution_strategy` | `execution.md` | Delivery Executive & Program Manager |
-| 7 | `RfpProposalPhase` | `rfp_proposal` | `proposal_compilation` | `proposal.md` | World-Class Proposal Writer (Fortune 500, $10M–$500M) |
+| Stage | Phase Class | phase_type | shared_output_key | output_filename | System Prompt Persona | Specialist Role |
+|-------|-------------|------------|-------------------|-----------------|-----------------------|-----------------|
+| 1 | `RfpRequirementsPhase` | `rfp_requirements` | `requirements_analysis` | `requirements.md` | Expert Business Analyst (15+ years) | Domain Validation Expert |
+| 2 | `RfpToolsPhase` | `rfp_tools` | `tools_technology` | `tools.md` | Senior Solutions Architect & Technology Evaluator (20+ years) | Security & Compliance Auditor |
+| 3 | `RfpCloudPhase` | `rfp_cloud` | `cloud_infrastructure` | `cloud.md` | Cloud Infrastructure Architect (20+ years, AWS/Azure/GCP) | Cloud Cost Optimisation Specialist |
+| 4 | `RfpImplementationPhase` | `rfp_implementation` | `implementation_plan` | `implementation.md` | Senior Project Manager & Delivery Lead | Delivery Assurance Analyst |
+| 5 | `RfpArchitecturePhase` | `rfp_architecture` | `architecture_design` | `architecture.md` | Principal System Architect | Scalability & Implementation Engineer |
+| 6 | `RfpExecutionPhase` | `rfp_execution` | `execution_strategy` | `execution.md` | Delivery Executive & Program Manager | Risk & Governance Specialist |
+| 7 | `RfpProposalPhase` | `rfp_proposal` | `proposal_compilation` | `proposal.md` | World-Class Proposal Writer (Fortune 500, $10M–$500M) | Senior Proposal Editor |
+
+Each phase defines three key prompts: `system_prompt` (primary agent persona), `specialist_system_prompt` (domain validation agent), and the shared `review_system_prompt` (13-point quality checklist).
 
 ### Prompt Quality Rules (enforced across phases)
 
-- **USD only** — All costs must be in USD ($), never INR/EUR/GBP
+- **Dynamic currency** — All costs must use the currency detected from the RFP (defaults to USD if not found) — no mixed currencies
 - **Cost table format** — Both Monthly and Annual columns, Annual = Monthly × 12, no empty cells
 - **No placeholders** — Zero bracket-enclosed placeholder text (`[Insert ...]` forbidden)
 - **Comparison tables** — Every tool/technology must have head-to-head comparison vs alternatives
@@ -617,25 +636,29 @@ Each LLM call's token usage is recorded via `CostRepository`:
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| `model` | `gpt-4o` | Configurable via `config_overrides` or `STAGE_MODEL_MAP` |
+| `model` | `gpt-4o` | Configurable via `config_overrides` or `STAGE_MODEL_MAP` (overridden by `PHASE_AGENT_MODELS` when `multi_agent=True`) |
 | `temperature` | `0.7` | Balanced creativity/consistency (omitted for reasoning models like o3-mini) |
 | `max_completion_tokens` | `16384` | Sufficient for detailed markdown |
-| `n_reviews` | `1` | 1 review pass (2 LLM calls total per stage) |
+| `n_reviews` | `1` | 1 review pass per stage |
 | `review_model` | `None` (same as model) | Can use a different model for review |
+| `multi_agent` | `True` | Enable 3-agent pipeline (primary → specialist → reviewer). Set `False` for 2-pass generate→review. |
+| `specialist_model` | `None` (per-stage) | Override specialist model; defaults from `PHASE_AGENT_MODELS` in `agent_teams.py` |
 
 ### Stage-to-Model Map (`STAGE_MODEL_MAP`)
 
-All stages use `gpt-4o` for consistent, reliable results.  Users can override per-stage via `config_overrides` in the execute request.
+All stages use `gpt-4o` as the base model.  When `multi_agent=True` (default), these are **overridden** by `PHASE_AGENT_MODELS` from `agent_teams.py`:
 
-| Stage | Model |
-|-------|-------|
-| 1. Requirements Analysis | `gpt-4o` |
-| 2. Tools & Technology | `gpt-4o` |
-| 3. Cloud & Infrastructure | `gpt-4o` |
-| 4. Implementation Plan | `gpt-4o` |
-| 5. Architecture Design | `gpt-4o` |
-| 6. Execution Strategy | `gpt-4o` |
-| 7. Proposal Compilation | `gpt-4o` |
+| Stage | Primary Model | Specialist Model | Reviewer Model |
+|-------|--------------|-----------------|----------------|
+| 1. Requirements Analysis | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
+| 2. Tools & Technology | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
+| 3. Cloud & Infrastructure | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
+| 4. Implementation Plan | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
+| 5. Architecture Design | GPT-5.3 | GPT-4.1 | GPT-4o |
+| 6. Execution Strategy | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
+| 7. Proposal Compilation | GPT-5.3 | GPT-4.1 | GPT-4o |
+
+Users can override per-stage via `config_overrides` in the execute request.
 
 > **Azure deployment:** Ensure `AZURE_OPENAI_DEPLOYMENT` is set to your gpt-4o deployment name.
 
@@ -645,12 +668,273 @@ GPT-5.3, GPT-4.1, GPT-4.1 Mini, GPT-4o, GPT-4o Mini, o3-mini, Gemini 2.5 Pro, Ge
 
 ---
 
-## 16. End-to-End User Flow
+## 16. Token Capacity Management
+
+Source: `cmbagent/phases/rfp/token_utils.py`, integrated in `cmbagent/phases/rfp/base.py`, `cmbagent/phases/rfp/proposal_phase.py`, and `backend/routers/rfp.py`
+
+### Problem
+
+Later stages (especially Stage 7 — Proposal Compilation) inject all prior stage outputs into the prompt. For models with smaller context windows (e.g., GPT-4o at 128K tokens), the combined prompt can exceed the model's capacity and cause API errors or truncated output (`finish_reason=length`).
+
+### Solution: Comprehensive Token Protection at Every LLM Call
+
+**All 11 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are protected with token capacity management:
+
+| # | Call Site | File | Protection |
+|---|-----------|------|------------|
+| 1 | Generation pass (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic `max_completion_tokens` cap |
+| 2 | Generation pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
+| 3 | Specialist pass (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic `max_completion_tokens` cap |
+| 4 | Specialist pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
+| 5 | Review pass (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic `max_completion_tokens` cap |
+| 6 | Review pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
+| 7 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic `max_completion_tokens` cap via `get_model_limits` |
+| 8 | Stage 7 specialist | `proposal_phase.py` | `_run_specialist()` (inherited) |
+| 9 | Stage 7 review (single-shot) | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
+| 10 | Stage 7 review (chunked) | `proposal_phase.py` | Per-chunk dynamic cap |
+| 11 | Refinement chat | `rfp.py` | Dynamic cap + content trimming when overflow |
+
+### Safety Margin: 0.75 (75%)
+
+All token budget calculations use a **0.75 safety margin** instead of the theoretical maximum. This is because `tiktoken` (the token counting library) can undercount by 10–20% compared to the API's actual tokenizer due to special tokens, markdown formatting, and Unicode handling.
+
+```python
+usable_ctx = int(max_ctx * 0.75) - max_completion_tokens
+```
+
+### Dynamic `max_completion_tokens` Capping
+
+At every LLM call, the `max_completion_tokens` parameter is dynamically capped so that `prompt_tokens + max_completion_tokens` never exceeds the model's context window:
+
+```python
+prompt_tokens = count_tokens(system + user, model)
+available_for_output = max_ctx - prompt_tokens - 200  # 200 token safety buffer
+max_comp = min(config.max_completion_tokens, max(available_for_output, 4096))
+```
+
+This prevents `finish_reason=length` truncation and ensures the model has room for both prompt and output.
+
+### Prompt Chunking Strategy
+
+When the full prompt exceeds the usable context window, it is automatically split:
+
+```
+RfpPhaseBase.execute(context)
+  │
+  ├── 1. Count tokens: system_prompt + user_prompt
+  │
+  ├── 2. Compare against: (max_context × 0.75) - max_completion_tokens
+  │
+  ├── 3a. If fits → single API call with dynamic max_completion_tokens cap
+  │
+  └── 3b. If exceeds → split user_prompt at '---' section boundaries
+          ├── Chunk 1: sections 1..N  → API call (dynamic cap) → partial output 1
+          ├── Chunk 2: sections N+1..M → API call (dynamic cap) → partial output 2
+          └── Combine: partial output 1 + partial output 2 = full content
+```
+
+The same chunking logic applies to **review passes** — if the draft document is too large for the review model's context, the review is split into sub-reviews that are independently capped and then concatenated.
+
+### Overflow Fallback for Unsplittable Prompts
+
+If a prompt exceeds capacity but has no `---` section boundaries to split on, `chunk_prompt_if_needed()` returns `[user_prompt]` (a single-element list) instead of `None`. This ensures the caller still processes it through the chunked code path (with logging and guards) rather than silently sending an oversized prompt to the API.
+
+### Model Token Limits Registry
+
+| Model | Max Context | Max Output |
+|-------|------------|------------|
+| `gpt-4o` | 128,000 | 16,384 |
+| `gpt-4o-mini` | 128,000 | 16,384 |
+| `gpt-4.1` / `gpt-4.1-2025-04-14` | 1,000,000 | 32,768 |
+| `gpt-4.1-mini` | 1,000,000 | 32,768 |
+| `gpt-5.3` | 1,000,000 | 32,768 |
+| `o3-mini` | 128,000 | 16,384 |
+| `claude-sonnet-4-20250514` | 200,000 | 8,192 |
+| `claude-3.5-sonnet-20241022` | 200,000 | 8,192 |
+| `gemini-2.5-pro` | 1,000,000 | 8,192 |
+| `gemini-2.5-flash` | 1,000,000 | 8,192 |
+
+Unknown models fall back to 128K context / 16K output.
+
+### Key Functions (`token_utils.py`)
+
+| Function | Purpose |
+|----------|--------|
+| `get_model_limits(model)` | Returns `(max_context, max_output)` for a model |
+| `count_tokens(text, model)` | Count tokens using tiktoken (fallback: chars÷4) |
+| `count_messages_tokens(messages, model)` | Count tokens for a chat message list |
+| `chunk_prompt_if_needed(system, user, model, max_completion, safety_margin)` | Returns `None` (fits) or `List[str]` (chunks) |
+| `group_sources_by_budget(sources, base_tokens, model, max_completion, safety_margin)` | Group source keys into batches that fit context (used by Stage 7) |
+
+### Console Output
+
+During execution, the token budget and chunking decisions are logged to the console (visible in the UI):
+
+```
+[Proposal Compilation] Model gpt-4o: context=128,000, usable_for_prompt=79,616
+[Proposal Compilation] Full prompt: 95,000 tokens (system=500, user=94,500)
+[Proposal Compilation] Prompt exceeds usable context — using divide-and-accumulate strategy
+[Proposal Compilation] Divided 6 sources into 2 group(s)
+[Proposal Compilation] Group 1/2: Requirements Analysis, Tools & Technology Selection, Cloud & Infrastructure Planning
+[Proposal Compilation] Capping max_completion_tokens: 16384 → 12000 (prompt=115,800, context=128,000)
+...
+```
+
+---
+
+## 17. Dynamic Currency System
+
+Source: `cmbagent/phases/rfp/requirements_phase.py` (extraction), `cmbagent/phases/rfp/base.py` (rule generation), all phase classes (consumption)
+
+### Problem
+
+Previously, all cost figures were hardcoded to USD ($). Clients submitting RFPs in EUR, GBP, INR, or other currencies would receive proposals with incorrect currency.
+
+### Solution: Extract Currency from RFP, Propagate Through All Stages
+
+**Stage 1 (Requirements Analysis)** extracts the currency from the RFP document:
+
+```
+10. **Currency** — Identify the currency used in the RFP (e.g., USD, EUR, GBP, INR).
+    Look for currency symbols ($, €, £, ₹), currency codes, or country context.
+    Output:
+    ## Currency
+    **Primary Currency:** <CODE> (<SYMBOL>)
+    If no currency is explicitly stated, default to USD ($).
+```
+
+**`RfpPhaseBase.get_currency_rule(context)`** parses the Stage 1 output and generates a currency instruction string:
+
+```python
+@staticmethod
+def get_currency_rule(context: PhaseContext) -> str:
+    # Regex: **Primary Currency:** USD ($)
+    m = re.search(r"\*\*Primary Currency:\*\*\s*([A-Z]{3})\s*\(([^)]+)\)", reqs)
+    code, symbol = m.group(1), m.group(2)  # or defaults to USD ($)
+    return f"CURRENCY RULE: ALL monetary values MUST be in {code} ({symbol}) only..."
+```
+
+**All cost-producing stages** inject this rule into their prompts:
+
+| Stage | Phase Class | Currency Integration |
+|-------|-------------|---------------------|
+| 2 | `RfpToolsPhase` | `{self.get_currency_rule(context)}` in `build_user_prompt()` |
+| 3 | `RfpCloudPhase` | `{self.get_currency_rule(context)}` in `build_user_prompt()` |
+| 4 | `RfpImplementationPhase` | `{self.get_currency_rule(context)}` in `build_user_prompt()` |
+| 7 | `RfpProposalPhase` | `{self.get_currency_rule(context)}` in both `_build_full_prompt()` and `_build_partial_prompt()` |
+
+The review system prompt uses generic "single consistent currency" language (item 9) so it validates whatever currency was selected.
+
+---
+
+## 18. Divide-and-Accumulate Strategy (Stage 7)
+
+Source: `cmbagent/phases/rfp/proposal_phase.py`
+
+### Problem
+
+Stage 7 (Proposal Compilation) injects all 6 prior stage outputs into one prompt. For GPT-4o (128K context), the combined prompt frequently exceeds the context window. Simple truncation or condensation would lose critical data — cost figures, comparison tables, timelines.
+
+### Solution: Zero-Data-Loss Divide-and-Accumulate
+
+`RfpProposalPhase` overrides `execute()` with a custom strategy:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                  Stage 7 Execution Flow                              │
+│                                                                      │
+│  1. Build full prompt with all 6 source sections                     │
+│  2. Count tokens: system + user prompt                               │
+│                                                                      │
+│  ┌──────────────── PATH A ────────────────┐                          │
+│  │  Prompt fits (tokens ≤ usable_ctx)     │                          │
+│  │  → Single generation call              │                          │
+│  │  → If 0 chars returned → fall to B     │                          │
+│  └────────────────────────────────────────┘                          │
+│                                                                      │
+│  ┌──────────────── PATH B ────────────────┐                          │
+│  │  Prompt overflows or PATH A failed     │                          │
+│  │                                         │                          │
+│  │  1. group_sources_by_budget()           │                          │
+│  │     → Divide 6 sources into N groups    │                          │
+│  │     that each fit the context window    │                          │
+│  │                                         │                          │
+│  │  2. For each group:                     │                          │
+│  │     → _build_partial_prompt()           │                          │
+│  │       (only relevant proposal sections) │                          │
+│  │     → _single_generate()               │                          │
+│  │       (dynamic max_completion_tokens)   │                          │
+│  │                                         │                          │
+│  │  3. Accumulation pass:                  │                          │
+│  │     → Merge all partials into one doc   │                          │
+│  │     → Fix numbering, remove duplicates  │                          │
+│  │     → Preserve 100% of content          │                          │
+│  └────────────────────────────────────────┘                          │
+│                                                                      │
+│  4. Review pass (with chunking + dynamic cap)                        │
+│  5. Save proposal.md                                                 │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Source-to-Section Mapping
+
+Each source is mapped to specific proposal sections via `_SOURCE_TO_SECTIONS`:
+
+| Source | Assigned Proposal Sections |
+|--------|---------------------------|
+| `requirements_analysis` | Cover Page, Executive Summary, Purpose & Introduction, Understanding of Requirements |
+| `tools_technology` | Technology Stack & Tooling, Appendix B (Evaluation Matrices) |
+| `cloud_infrastructure` | Cloud Infrastructure & Provider Selection, Appendix A (Cost Breakdowns) |
+| `implementation_plan` | Methodology, Timeline & Milestones, Resources, Implementation Approach |
+| `architecture_design` | Proposed Solution Overview, System Architecture, Appendix C (Charts & Data) |
+| `execution_strategy` | Execution Plan, Risk Management, Qualifications, Compliance, Pricing, Terms, Appendices D & E |
+
+### Key Functions
+
+| Function | Purpose |
+|----------|--------|
+| `_get_sources(context)` | Extract 6 source outputs from `shared_state` |
+| `_build_full_prompt(context, sources)` | Full prompt with all 6 sources + 19-section document structure |
+| `_build_partial_prompt(context, keys, sources)` | Prompt for a subset of sources, targeting only their assigned sections |
+| `_single_generate(client, resolved, prompt, is_reasoning, system_override)` | Single LLM call with dynamic `max_completion_tokens` capping |
+| `group_sources_by_budget(sources, base_tokens, model, max_comp, margin)` | Greedy bin-packing of source keys into groups that fit the context window |
+
+---
+
+## 19. Refinement Chat Token Safety
+
+Source: `backend/routers/rfp.py` — `refine_rfp_content()` endpoint
+
+### Problem
+
+The refinement chat (`POST /{task_id}/stages/{N}/refine`) sends the full stage content + user instruction to the LLM. For large stage outputs (especially Stage 7), this could exceed the model's context window and cause `ECONNRESET` or API errors.
+
+### Solution
+
+The refine endpoint now has:
+
+1. **`timeout=300`** on the OpenAI client to prevent connection resets
+2. **Dynamic `max_completion_tokens` capping** — same approach as phase execution
+3. **Content trimming** — if the content exceeds the usable context, it is trimmed by taking the start and end of the content (preserving context from both halves) using tiktoken token-level encoding/decoding
+
+```python
+# If content is too large, trim to fit — take start + end
+usable_for_content = int(max_ctx * 0.75) - sys_tokens - instruction_tokens - max_comp - 200
+if content_tokens > usable_for_content:
+    tokens = enc.encode(content)
+    half = usable_for_content // 2
+    trimmed_tokens = tokens[:half] + tokens[-half:]
+    trimmed_content = enc.decode(trimmed_tokens)
+```
+
+---
+
+## 20. End-to-End User Flow
 
 ### Step 0: Setup
 1. User selects "RFP Proposal Generator" on Tasks page
 2. Uploads RFP document (PDF auto-extracted to textarea) + optional context
-3. Clicks "Analyze Requirements" → `POST /api/rfp/create` + `executeStage(1)`
+3. Clicks "Analyze Requirements" → `POST /api/rfp/create` + `executeStage(1)` (button disables after first click to prevent duplicate submissions)
 
 ### Steps 1–6: Iterative Review
 1. Stage executes in background (`_run_rfp_stage` → `phase.execute()`)
@@ -661,11 +945,11 @@ GPT-5.3, GPT-4.1, GPT-4.1 Mini, GPT-4o, GPT-4o Mini, o3-mini, Gemini 2.5 Pro, Ge
 ### Step 7: Proposal Compilation
 1. `executeStage(7)` — all 6 prior outputs injected into prompt
 2. LLM compiles comprehensive proposal with all sections + appendices
-3. Success banner + proposal preview + download links for all 7 artifacts
+3. Success banner + PDF preview (resizable modal with embedded PDF viewer) + download links for all 7 artifacts
 
 ---
 
-## 17. Error Handling
+## 21. Error Handling
 
 Stages fail for: LLM errors (empty response, API failure), infrastructure issues (rate limits, network), or data issues (missing shared state).
 
@@ -675,6 +959,45 @@ Stages fail for: LLM errors (empty response, API failure), infrastructure issues
 | `openai.RateLimitError` | Wait and retry, or use different model |
 | Empty response | Retry (transient API issue) |
 | `Stage N must be completed first` | Complete prior stages (strict ordering enforced) |
-| Large prompt truncation (stages 5-7) | Use model with larger context (GPT-4.1 = 1M tokens) |
+| Large prompt truncation (stages 5-7) | Automatic chunking handles this; or use model with larger context (GPT-4.1 = 1M tokens) |
 
 Failures are: stored in `TaskStage.error_message`, logged with full traceback, sent via WebSocket as `stage_failed` event, shown in UI with Retry button.
+
+---
+
+## 22. Multi-Agent System
+
+Source: `cmbagent/phases/rfp/agent_teams.py`, `cmbagent/phases/rfp/base.py`
+
+Each RFP stage uses a **team of 3 specialised agents** that collaborate sequentially:
+
+```
+Primary Agent → Specialist Agent → Reviewer Agent
+  (generate)       (validate)        (quality check)
+```
+
+### Configuration
+
+- `multi_agent=True` (default) — enables the 3-agent pipeline
+- `multi_agent=False` — reverts to the original 2-pass (generate → review) cycle
+- `specialist_model` — override the specialist model for a specific phase (defaults from `PHASE_AGENT_MODELS`)
+
+### Model Assignments (`PHASE_AGENT_MODELS`)
+
+Defined in `agent_teams.py`. Models are optimised per agent role:
+
+| Stage | Primary | Specialist | Reviewer |
+|-------|---------|-----------|----------|
+| 1–4, 6 | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
+| 5 (Architecture) | GPT-5.3 | GPT-4.1 | GPT-4o |
+| 7 (Proposal) | GPT-5.3 | GPT-4.1 | GPT-4o |
+
+### Token Safety
+
+The specialist pass (`_run_specialist()` in `base.py`) has the same full token protection as all other LLM calls: `chunk_prompt_if_needed(safety_margin=0.75)` + dynamic `max_completion_tokens` capping. Enriched output must exceed 30% of original length to be accepted.
+
+For full details, see the [Multi-Agent System section in rfp-proposal-generator.md](rfp-proposal-generator.md#15-multi-agent-system).
+
+---
+
+*Last updated: March 2026*

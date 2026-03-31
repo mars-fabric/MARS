@@ -39,6 +39,22 @@ class RfpImplementationPhase(RfpPhaseBase):
             "allocations, and quality gates."
         )
 
+    @property
+    def specialist_system_prompt(self) -> str:
+        return (
+            "You are a senior delivery assurance analyst and resource planning expert "
+            "with experience validating project plans for enterprise IT programmes.  "
+            "You will receive an implementation plan. Validate and enrich it:\n"
+            "1. Validate timeline feasibility given team size, technology complexity, and dependencies\n"
+            "2. Check for missing dependencies, unrealistic milestones, or compressed phases\n"
+            "3. Verify resource allocation is balanced \u2014 no single-person bottlenecks\n"
+            "4. Validate budget breakdown against industry benchmarks for similar projects\n"
+            "5. Ensure quality gates, acceptance criteria, and communication cadence are defined\n"
+            "6. Check sprint capacities and velocity assumptions are realistic\n"
+            "7. Verify cost calculations (Monthly \u00d7 12 = Annual)\n"
+            "Return the COMPLETE improved document \u2014 not a commentary. Output clean markdown only."
+        )
+
     def build_user_prompt(self, context: PhaseContext) -> str:
         ss = context.shared_state
         return f"""Based on all previous analysis, create a comprehensive implementation plan.
@@ -64,6 +80,6 @@ Create an implementation plan covering:
 9. **Communication Plan** — Standup cadence, reporting structure, escalation path
 10. **Budget Breakdown** — Cost per phase (people + tools + cloud)
 
-CURRENCY RULE: ALL costs MUST be in USD ($) only. NEVER use INR, EUR, GBP, or any other currency. Every cost figure must use the $ symbol with USD amounts.
+{self.get_currency_rule(context)}
 
 Produce a detailed markdown document with timeline tables."""

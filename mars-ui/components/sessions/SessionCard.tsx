@@ -104,7 +104,13 @@ export default function SessionCard({
         backgroundColor: selected
           ? 'var(--mars-color-primary-subtle)'
           : 'var(--mars-color-surface-raised)',
-        borderColor: selected
+        borderTopColor: selected
+          ? 'var(--mars-color-primary)'
+          : 'var(--mars-color-border)',
+        borderRightColor: selected
+          ? 'var(--mars-color-primary)'
+          : 'var(--mars-color-border)',
+        borderBottomColor: selected
           ? 'var(--mars-color-primary)'
           : 'var(--mars-color-border)',
         borderLeftWidth: '3px',
@@ -113,13 +119,17 @@ export default function SessionCard({
       onClick={() => onSelect(session.session_id)}
       onMouseEnter={(e) => {
         if (!selected) {
-          e.currentTarget.style.borderColor = 'var(--mars-color-border-strong)'
+          e.currentTarget.style.borderTopColor = 'var(--mars-color-border-strong)'
+          e.currentTarget.style.borderRightColor = 'var(--mars-color-border-strong)'
+          e.currentTarget.style.borderBottomColor = 'var(--mars-color-border-strong)'
           e.currentTarget.style.boxShadow = 'var(--mars-shadow-md)'
         }
       }}
       onMouseLeave={(e) => {
         if (!selected) {
-          e.currentTarget.style.borderColor = 'var(--mars-color-border)'
+          e.currentTarget.style.borderTopColor = 'var(--mars-color-border)'
+          e.currentTarget.style.borderRightColor = 'var(--mars-color-border)'
+          e.currentTarget.style.borderBottomColor = 'var(--mars-color-border)'
           e.currentTarget.style.boxShadow = 'none'
         }
       }}
