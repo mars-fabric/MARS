@@ -20,10 +20,19 @@ from cmbagent.phases.base import Phase, PhaseConfig, PhaseContext, PhaseResult, 
 logger = logging.getLogger(__name__)
 
 
+def _default_model() -> str:
+    """Resolve the default model from WorkflowConfig at import time."""
+    try:
+        from cmbagent.config import get_workflow_config
+        return get_workflow_config().default_llm_model
+    except Exception:
+        return "gpt-4o"
+
+
 @dataclass
 class RfpPhaseConfig(PhaseConfig):
     """Shared config knobs for every RFP stage."""
-    model: str = "gpt-4o"
+    model: str = field(default_factory=_default_model)
     temperature: float = 0.7
     max_completion_tokens: int = 16384
     # Multi-turn: number of self-review iterations the LLM can do.
@@ -116,20 +125,83 @@ class RfpPhaseBase(Phase):
     def get_currency_rule(context: PhaseContext) -> str:
         """Return a currency instruction derived from the requirements analysis.
 
-        Scans the stage-1 output for the ## Currency section.  If found, uses
-        that currency for all cost tables.  Otherwise defaults to USD ($).
+        Scans the stage-1 output for the ## Currency section.  If not found,
+        falls back to scanning the original RFP text for explicit currency
+        mentions (e.g. "Indian Rupees", "INR", "₹").  Defaults to USD only
+        when no currency signal is found anywhere.
         """
         import re
+
+        # Known currency map: code -> symbol
+        _CURRENCIES = {
+            "USD": "$", "EUR": "€", "GBP": "£", "INR": "₹",
+            "AUD": "A$", "CAD": "C$", "JPY": "¥", "CNY": "¥",
+            "SGD": "S$", "AED": "AED", "SAR": "SAR", "CHF": "CHF",
+        }
+        # Reverse: name -> code
+        _NAME_TO_CODE = {
+            "indian rupees": "INR", "indian rupee": "INR",
+            "us dollars": "USD", "us dollar": "USD",
+            "euros": "EUR", "euro": "EUR",
+            "british pounds": "GBP", "british pound": "GBP",
+            "pound sterling": "GBP", "pounds sterling": "GBP",
+            "australian dollars": "AUD", "australian dollar": "AUD",
+            "canadian dollars": "CAD", "canadian dollar": "CAD",
+            "japanese yen": "JPY", "chinese yuan": "CNY",
+            "singapore dollars": "SGD", "singapore dollar": "SGD",
+        }
+
+        code, symbol = None, None
+
+        # --- Pass 1: structured output from requirements analysis ---
         reqs = context.shared_state.get("requirements_analysis", "")
-        # Look for: **Primary Currency:** USD ($)  or similar
+        # Pattern A: **Primary Currency:** INR (₹)
         m = re.search(
-            r"\*\*Primary Currency:\*\*\s*([A-Z]{3})\s*\(([^)]+)\)",
-            reqs,
+            r"\*\*Primary Currency:\*\*\s*([A-Z]{3})\s*\(([^)]+)\)", reqs
         )
         if m:
             code, symbol = m.group(1), m.group(2)
         else:
+            # Pattern B: looser — "Currency: INR" or "Currency — INR (₹)"
+            m = re.search(
+                r"(?:currency|payment)\s*[:—\-]\s*([A-Z]{3})", reqs, re.I
+            )
+            if m:
+                code = m.group(1).upper()
+                symbol = _CURRENCIES.get(code, code)
+
+        # --- Pass 2: scan original RFP text for explicit currency mentions ---
+        if not code:
+            rfp_text = (context.task or "") + " " + reqs
+            rfp_lower = rfp_text.lower()
+
+            # Check for currency names ("Indian Rupees", "INR only", etc.)
+            for name, c in _NAME_TO_CODE.items():
+                if name in rfp_lower:
+                    code, symbol = c, _CURRENCIES[c]
+                    break
+
+            # Check for ISO codes with context ("INR only", "payment in INR")
+            if not code:
+                m = re.search(
+                    r"\b(INR|EUR|GBP|AUD|CAD|JPY|CNY|SGD|AED|SAR|CHF)\b",
+                    rfp_text,
+                )
+                if m and m.group(1) != "USD":
+                    code = m.group(1)
+                    symbol = _CURRENCIES.get(code, code)
+
+            # Check for symbols in the text (₹, €, £)
+            if not code:
+                for sym, c in [("₹", "INR"), ("€", "EUR"), ("£", "GBP")]:
+                    if sym in rfp_text:
+                        code, symbol = c, sym
+                        break
+
+        # --- Fallback ---
+        if not code:
             code, symbol = "USD", "$"
+
         return (
             f"CURRENCY RULE: ALL monetary values in the ENTIRE document MUST be "
             f"in {code} ({symbol}) only. NEVER mix currencies. Every cost figure "
@@ -147,7 +219,7 @@ class RfpPhaseBase(Phase):
         """Run generate pass (with auto-chunking if needed), then optional review pass(es)."""
         from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
         from cmbagent.phases.rfp.token_utils import (
-            get_effective_model_limits,
+            get_model_limits,
             count_tokens,
             chunk_prompt_if_needed,
         )
@@ -170,7 +242,7 @@ class RfpPhaseBase(Phase):
                 resolved = resolve_model_for_provider(model)
                 _review_model_name = _agent_models.get("reviewer", _review_model_name)
                 review_model = resolve_model_for_provider(_review_model_name)
-                _spec_model = self.config.specialist_model or _agent_models.get("specialist", "gpt-4.1-mini")
+                _spec_model = self.config.specialist_model or _agent_models.get("specialist", _default_model())
                 print(f"[{self.display_name}] Multi-agent: primary={model}, specialist={_spec_model}, reviewer={_review_model_name}")
 
             # Reasoning models (o3-*, o1-*) do not support the temperature param
@@ -179,8 +251,13 @@ class RfpPhaseBase(Phase):
 
             user_prompt = self.build_user_prompt(context)
 
+            # --- inject currency rule into every phase automatically ---
+            currency_rule = self.get_currency_rule(context)
+            if currency_rule not in user_prompt:
+                user_prompt = user_prompt.rstrip() + "\n\n" + currency_rule
+
             # --- token capacity check ---
-            max_ctx, max_out = get_effective_model_limits(model)
+            max_ctx, max_out = get_model_limits(model)
             print(f"[{self.display_name}] Model {model}: context={max_ctx:,} tokens, max_output={max_out:,} tokens")
 
             chunks = chunk_prompt_if_needed(
@@ -294,6 +371,8 @@ class RfpPhaseBase(Phase):
 
                 # Check if the review prompt also needs chunking
                 review_prompt = f"Draft document:\n\n{content}"
+                # Inject currency rule so the reviewer never changes currency
+                review_prompt = review_prompt.rstrip() + "\n\n" + currency_rule
                 review_chunks = chunk_prompt_if_needed(
                     system_prompt=self.review_system_prompt,
                     user_prompt=review_prompt,
@@ -423,7 +502,7 @@ class RfpPhaseBase(Phase):
         """
         from cmbagent.llm_provider import resolve_model_for_provider
         from cmbagent.phases.rfp.token_utils import (
-            get_effective_model_limits, count_tokens, chunk_prompt_if_needed,
+            get_model_limits, count_tokens, chunk_prompt_if_needed,
         )
         from cmbagent.phases.rfp.agent_teams import get_phase_models
 
@@ -432,12 +511,16 @@ class RfpPhaseBase(Phase):
             return content, 0, 0
 
         models = get_phase_models(self.phase_type)
-        spec_model = self.config.specialist_model or models.get("specialist", "gpt-4.1-mini")
+        spec_model = self.config.specialist_model or models.get("specialist", self.config.model)
         resolved_spec = resolve_model_for_provider(spec_model)
         _is_reasoning = any(spec_model.startswith(p) for p in ("o3", "o1"))
 
-        max_ctx, _ = get_effective_model_limits(spec_model)
+        max_ctx, _ = get_model_limits(spec_model)
         spec_user = f"Document to validate and improve:\n\n{content}"
+
+        # Inject currency rule so the specialist never changes currency
+        currency_rule = self.get_currency_rule(context)
+        spec_user = spec_user.rstrip() + "\n\n" + currency_rule
 
         print(f"[{self.display_name}] Specialist agent ({spec_model}) validating content...")
 

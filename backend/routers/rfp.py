@@ -33,6 +33,8 @@ from models.rfp_schemas import (
     RfpStageResponse,
     RfpStageContentResponse,
     RfpContentUpdateRequest,
+    RfpRefineRequest,
+    RfpRefineResponse,
     RfpTaskStateResponse,
     RfpRecentTaskResponse,
 )
@@ -59,18 +61,17 @@ STAGE_DEFS = [
 STAGE_NAMES = {d["number"]: d["name"] for d in STAGE_DEFS}
 
 # ---------------------------------------------------------------------------
-# Stage-to-Model Map — all stages use gpt-4o for consistent, reliable results.
-# The user can override per-stage via config_overrides in the execute request.
+# Default model — pulled from cmbagent WorkflowConfig so it stays in sync
+# with the rest of the platform.  The user can still override per-stage via
+# config_overrides in the execute request.
 # ---------------------------------------------------------------------------
-STAGE_MODEL_MAP: Dict[int, str] = {
-    1: "gpt-4o",   # Requirements Analysis
-    2: "gpt-4o",   # Tools & Technology
-    3: "gpt-4o",   # Cloud & Infrastructure
-    4: "gpt-4o",   # Implementation Plan
-    5: "gpt-4o",   # Architecture Design
-    6: "gpt-4o",   # Execution Strategy
-    7: "gpt-4o",   # Proposal Compilation
-}
+def _get_default_rfp_model() -> str:
+    """Return the default LLM model from cmbagent workflow config."""
+    try:
+        from cmbagent.config import get_workflow_config
+        return get_workflow_config().default_llm_model
+    except Exception:
+        return "gpt-4o"
 
 
 # =============================================================================
@@ -296,8 +297,8 @@ async def _run_rfp_stage(
         stage_name = stage_def["name"]
 
         # Build phase config from overrides
-        # Use stage-optimised model by default; allow user override
-        model = STAGE_MODEL_MAP.get(stage_num, "gpt-4o")
+        # Use dynamic model from workflow config; allow user override
+        model = _get_default_rfp_model()
         n_reviews = 1
         if config_overrides:
             model = config_overrides.get("model", model)
@@ -330,12 +331,11 @@ async def _run_rfp_stage(
 
         print(f"Calling LLM for {stage_name} (this may take a minute)...")
 
-        # Execute the phase (3-agent pipeline: primary → specialist → reviewer) with a timeout
-        # 900s accommodates 3 LLM calls at up to 300s each
+        # Execute the phase (generate → review cycle) with a timeout
         try:
-            result = await asyncio.wait_for(phase.execute(ctx), timeout=900)
+            result = await asyncio.wait_for(phase.execute(ctx), timeout=600)
         except asyncio.TimeoutError:
-            raise RuntimeError(f"Stage {stage_name} timed out after 900 seconds")
+            raise RuntimeError(f"Stage {stage_name} timed out after 600 seconds")
 
         if result.status.value != "completed":
             raise RuntimeError(result.error or f"Phase {stage_name} failed")
@@ -467,7 +467,7 @@ async def create_rfp_task(request: RfpCreateRequest):
             session_id=session_id,
             mode="rfp-proposal",
             agent="phase_orchestrator",
-            model="gpt-4o",
+            model=_get_default_rfp_model(),
             status="executing",
             task_description=request.task or "",
             started_at=datetime.now(timezone.utc),
@@ -789,6 +789,64 @@ async def update_rfp_stage_content(task_id: str, stage_num: int, request: RfpCon
     finally:
         db.close()
 
+
+@router.post("/{task_id}/stages/{stage_num}/refine", response_model=RfpRefineResponse)
+async def refine_rfp_content(task_id: str, stage_num: int, request: RfpRefineRequest):
+    """Use LLM to refine stage content based on user instruction."""
+    from cmbagent.llm_provider import safe_completion
+    from cmbagent.phases.rfp.token_utils import count_tokens, get_model_limits
+
+    model = _get_default_rfp_model()
+
+    # --- token capacity check ---
+    max_ctx, _ = get_model_limits(model)
+    system_msg = "You are a technical proposal consultant. Refine the following content based on the user's instruction. Return ONLY the refined markdown content, no explanations."
+    user_msg = f"Current content:\n\n{request.content}\n\n---\n\nInstruction: {request.message}"
+
+    prompt_tokens = count_tokens(system_msg, model) + count_tokens(user_msg, model) + 6
+    available_for_output = max_ctx - prompt_tokens - 200
+    max_comp = min(16384, max(available_for_output, 4096))
+
+    # If content is too large, trim the content passed to refine but keep
+    # the user instruction intact.  This avoids a context overflow crash.
+    usable_for_content = int(max_ctx * 0.75) - count_tokens(system_msg, model) - count_tokens(request.message, model) - max_comp - 200
+    content_tokens = count_tokens(request.content, model)
+
+    if content_tokens > usable_for_content and usable_for_content > 2000:
+        # Truncate content to fit — take start + end to preserve context
+        import tiktoken
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            enc = tiktoken.get_encoding("cl100k_base")
+        tokens = enc.encode(request.content)
+        half = usable_for_content // 2
+        trimmed_tokens = tokens[:half] + tokens[-half:]
+        trimmed_content = enc.decode(trimmed_tokens)
+        user_msg = f"Current content:\n\n{trimmed_content}\n\n---\n\nInstruction: {request.message}"
+        # Recalculate
+        prompt_tokens = count_tokens(system_msg, model) + count_tokens(user_msg, model) + 6
+        available_for_output = max_ctx - prompt_tokens - 200
+        max_comp = min(16384, max(available_for_output, 4096))
+
+    def _call_refine():
+        return safe_completion(
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": user_msg},
+            ],
+            model=model,
+            temperature=0.7,
+            max_tokens=max_comp,
+        )
+
+    refined = await asyncio.to_thread(_call_refine)
+
+    refined = refined or request.content
+    return RfpRefineResponse(
+        refined_content=refined,
+        message="Content refined successfully",
+    )
 
 
 @router.get("/{task_id}/stages/{stage_num}/console")

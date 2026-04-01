@@ -19,56 +19,43 @@ Models are assigned per-stage to optimise for the task complexity:
 
 from typing import Dict
 
+
+def _cfg_model() -> str:
+    """Return the default model from WorkflowConfig (never hardcoded)."""
+    try:
+        from cmbagent.config import get_workflow_config
+        return get_workflow_config().default_llm_model
+    except Exception:
+        return "gpt-4o"
+
+
 # ── Model assignments per phase_type ──────────────────────────────────
 # Keys: "primary" (generator), "specialist" (validator), "reviewer" (quality)
+#
+# All roles default to the model configured in WorkflowConfig so that
+# switching providers or deployments only requires a single change.
 
-PHASE_AGENT_MODELS: Dict[str, Dict[str, str]] = {
-    "rfp_requirements": {
-        "primary": "gpt-4.1",
-        "specialist": "gpt-4.1-mini",
-        "reviewer": "gpt-4o",
-    },
-    "rfp_tools": {
-        "primary": "gpt-4.1",
-        "specialist": "gpt-4.1-mini",
-        "reviewer": "gpt-4o",
-    },
-    "rfp_cloud": {
-        "primary": "gpt-4.1",
-        "specialist": "gpt-4.1-mini",
-        "reviewer": "gpt-4o",
-    },
-    "rfp_implementation": {
-        "primary": "gpt-4.1",
-        "specialist": "gpt-4.1-mini",
-        "reviewer": "gpt-4o",
-    },
-    "rfp_architecture": {
-        "primary": "gpt-5.3",
-        "specialist": "gpt-4.1",
-        "reviewer": "gpt-4o",
-    },
-    "rfp_execution": {
-        "primary": "gpt-4.1",
-        "specialist": "gpt-4.1-mini",
-        "reviewer": "gpt-4o",
-    },
-    "rfp_proposal": {
-        "primary": "gpt-5.3",
-        "specialist": "gpt-4.1",
-        "reviewer": "gpt-4o",
-    },
-}
-
-DEFAULT_AGENT_MODELS: Dict[str, str] = {
-    "primary": "gpt-4.1",
-    "specialist": "gpt-4.1-mini",
-    "reviewer": "gpt-4o",
-}
+def _build_phase_models() -> Dict[str, Dict[str, str]]:
+    """Build per-phase model map using the configured default model."""
+    m = _cfg_model()
+    return {
+        "rfp_requirements":   {"primary": m, "specialist": m, "reviewer": m},
+        "rfp_tools":           {"primary": m, "specialist": m, "reviewer": m},
+        "rfp_cloud":           {"primary": m, "specialist": m, "reviewer": m},
+        "rfp_implementation": {"primary": m, "specialist": m, "reviewer": m},
+        "rfp_architecture":   {"primary": m, "specialist": m, "reviewer": m},
+        "rfp_execution":      {"primary": m, "specialist": m, "reviewer": m},
+        "rfp_proposal":       {"primary": m, "specialist": m, "reviewer": m},
+    }
 
 
 def get_phase_models(phase_type: str) -> Dict[str, str]:
     """Return ``{"primary": ..., "specialist": ..., "reviewer": ...}``
     model assignments for the given *phase_type*.
+
+    Resolved dynamically from WorkflowConfig so config changes take effect
+    without restarting.
     """
-    return PHASE_AGENT_MODELS.get(phase_type, DEFAULT_AGENT_MODELS.copy())
+    models = _build_phase_models()
+    m = _cfg_model()
+    return models.get(phase_type, {"primary": m, "specialist": m, "reviewer": m})

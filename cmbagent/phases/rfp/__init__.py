@@ -16,7 +16,6 @@ from cmbagent.phases.rfp.execution_phase import RfpExecutionPhase, RfpExecutionC
 from cmbagent.phases.rfp.proposal_phase import RfpProposalPhase, RfpProposalConfig
 from cmbagent.phases.rfp.token_utils import (
     get_model_limits,
-    get_effective_model_limits,
     count_tokens,
     count_messages_tokens,
     chunk_prompt_if_needed,
@@ -24,8 +23,6 @@ from cmbagent.phases.rfp.token_utils import (
     MODEL_TOKEN_LIMITS,
 )
 from cmbagent.phases.rfp.agent_teams import (
-    PHASE_AGENT_MODELS,
-    DEFAULT_AGENT_MODELS,
     get_phase_models,
 )
 
@@ -37,7 +34,7 @@ __all__ = [
     "RfpArchitecturePhase", "RfpArchitectureConfig",
     "RfpExecutionPhase", "RfpExecutionConfig",
     "RfpProposalPhase", "RfpProposalConfig",
-    "get_model_limits", "get_effective_model_limits", "count_tokens", "count_messages_tokens",
+    "get_model_limits", "count_tokens", "count_messages_tokens",
     "chunk_prompt_if_needed", "group_sources_by_budget", "MODEL_TOKEN_LIMITS",
-    "PHASE_AGENT_MODELS", "DEFAULT_AGENT_MODELS", "get_phase_models",
+    "get_phase_models",
 ]

@@ -431,7 +431,7 @@ RULES:
         """
         from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
         from cmbagent.phases.rfp.token_utils import (
-            get_effective_model_limits, count_tokens, group_sources_by_budget,
+            get_model_limits, count_tokens, group_sources_by_budget,
         )
 
         self._status = PhaseStatus.RUNNING
@@ -458,7 +458,7 @@ RULES:
                     "reviewer", self.config.review_model or model,
                 )
                 review_model = resolve_model_for_provider(_review_model_name)
-                _spec_model = _agent_models.get("specialist", "gpt-4.1-mini")
+                _spec_model = _agent_models.get("specialist", self.config.model)
                 _is_reasoning = any(model.startswith(p) for p in ("o3", "o1"))
                 _is_review_reasoning = any(
                     _review_model_name.startswith(p) for p in ("o3", "o1")
@@ -470,7 +470,7 @@ RULES:
                     f"specialist={_spec_model}, reviewer={_review_model_name}"
                 )
 
-            max_ctx, _ = get_effective_model_limits(model)
+            max_ctx, _ = get_model_limits(model)
             # Use 0.75 safety margin — tiktoken can undercount by 10-20%
             # vs the API's actual tokenizer (special tokens, markdown, etc.)
             usable_ctx = int(max_ctx * 0.75) - self.config.max_completion_tokens
@@ -756,11 +756,11 @@ RULES:
         Dynamically caps max_completion_tokens so prompt + output never
         exceeds the model's context window.
         """
-        from cmbagent.phases.rfp.token_utils import count_tokens, get_effective_model_limits
+        from cmbagent.phases.rfp.token_utils import count_tokens, get_model_limits
 
         sys_prompt = system_override or self.system_prompt
         model = self.config.model
-        max_ctx, _ = get_effective_model_limits(model)
+        max_ctx, _ = get_model_limits(model)
 
         # Estimate prompt tokens and cap output to stay within context
         prompt_tokens = (count_tokens(sys_prompt, model)

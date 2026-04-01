@@ -6,6 +6,8 @@ import type {
     RfpTaskState,
     RfpStageContent,
     RfpCreateResponse,
+    RfpRefineResponse,
+    RfpRefinementMessage,
     RfpUploadedFile,
     RfpWizardStep,
     RfpStageConfig,
@@ -21,6 +23,7 @@ interface UseRfpTaskReturn {
 
     // Stage content
     editableContent: string
+    refinementMessages: RfpRefinementMessage[]
     consoleOutput: string[]
     isExecuting: boolean
 
@@ -38,6 +41,7 @@ interface UseRfpTaskReturn {
     executeStage: (stageNum: number, overrideId?: string) => Promise<void>
     fetchStageContent: (stageNum: number) => Promise<RfpStageContent | null>
     saveStageContent: (stageNum: number, content: string, field: string) => Promise<void>
+    refineContent: (stageNum: number, message: string, content: string) => Promise<string | null>
     uploadFile: (file: File) => Promise<void>
     setCurrentStep: (step: RfpWizardStep) => void
     setEditableContent: (content: string) => void
@@ -55,6 +59,7 @@ export function useRfpTask(): UseRfpTaskReturn {
     const [error, setError] = useState<string | null>(null)
 
     const [editableContent, setEditableContent] = useState('')
+    const [refinementMessages, setRefinementMessages] = useState<RfpRefinementMessage[]>([])
     const [consoleOutput, setConsoleOutput] = useState<string[]>([])
     const [isExecuting, setIsExecuting] = useState(false)
     const [uploadedFiles, setUploadedFiles] = useState<RfpUploadedFile[]>([])
@@ -288,6 +293,41 @@ export function useRfpTask(): UseRfpTaskReturn {
         }
     }, [taskId, apiFetch])
 
+    const refineContent = useCallback(async (
+        stageNum: number,
+        message: string,
+        content: string,
+    ): Promise<string | null> => {
+        if (!taskId) return null
+
+        const userMsg: RfpRefinementMessage = {
+            id: `u-${Date.now()}`,
+            role: 'user',
+            content: message,
+            timestamp: Date.now(),
+        }
+        setRefinementMessages(prev => [...prev, userMsg])
+
+        try {
+            const resp: RfpRefineResponse = await apiFetch(`/api/rfp/${taskId}/stages/${stageNum}/refine`, {
+                method: 'POST',
+                body: JSON.stringify({ message, content }),
+            })
+
+            const assistantMsg: RfpRefinementMessage = {
+                id: `a-${Date.now()}`,
+                role: 'assistant',
+                content: resp.refined_content,
+                timestamp: Date.now(),
+            }
+            setRefinementMessages(prev => [...prev, assistantMsg])
+            return resp.refined_content
+        } catch (e: unknown) {
+            setError(e instanceof Error ? e.message : 'Refinement failed')
+            return null
+        }
+    }, [taskId, apiFetch])
+
     // ---- File upload ----
 
     const uploadFile = useCallback(async (file: File) => {
@@ -406,6 +446,7 @@ export function useRfpTask(): UseRfpTaskReturn {
         isLoading,
         error,
         editableContent,
+        refinementMessages,
         consoleOutput,
         isExecuting,
         uploadedFiles,
@@ -417,6 +458,7 @@ export function useRfpTask(): UseRfpTaskReturn {
         executeStage,
         fetchStageContent,
         saveStageContent,
+        refineContent,
         uploadFile,
         setCurrentStep,
         setEditableContent,

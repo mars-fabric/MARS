@@ -71,7 +71,10 @@ class RfpRequirementsPhase(RfpPhaseBase):
 7. **Assumptions** — Key assumptions being made
 8. **Deliverables** — Expected outputs
 9. **Budget Analysis** — Extract any budget figures, price ranges, cost constraints, or financial limits mentioned in the RFP. If a specific budget is stated, note the exact amount. If implied through scope or similar projects, provide a reasonable estimate. This budget will guide all downstream tool selection, cloud planning, and cost decisions.
-10. **Currency** — Identify the currency used in the RFP (e.g., USD, EUR, GBP, INR, AUD, CAD, etc.). Look for currency symbols ($, €, £, ₹, etc.), currency codes, or country context. Output a dedicated section:
+10. **Currency** — Identify the currency used in the RFP. This is CRITICAL — downstream stages use this to format ALL cost tables.
+   - Search the ENTIRE RFP for: currency codes (INR, USD, EUR, GBP, etc.), currency names ("Indian Rupees", "US Dollars"), currency symbols (₹, $, €, £), and payment terms mentioning a specific currency.
+   - If the RFP says "Indian Rupees" or "INR" ANYWHERE (even in payment terms, billing clauses, or annexures), the currency is INR (₹).
+   - Output a dedicated section:
 
 ## Currency
 **Primary Currency:** <CURRENCY_CODE> (<SYMBOL>)

@@ -12,6 +12,15 @@ from typing import List, Dict, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
+
+def _default_model() -> str:
+    """Resolve the default model from WorkflowConfig (avoids hardcoding)."""
+    try:
+        from cmbagent.config import get_workflow_config
+        return get_workflow_config().default_llm_model
+    except Exception:
+        return "gpt-4o"
+
 # ---------------------------------------------------------------------------
 # Model token capacity registry
 #
@@ -61,51 +70,13 @@ def get_model_limits(model: str) -> Tuple[int, int]:
     return (DEFAULT_CONTEXT_LIMIT, DEFAULT_OUTPUT_LIMIT)
 
 
-
-def get_effective_model_limits(model: str) -> Tuple[int, int]:
-    """Return token limits for the **actual** model that will serve the request.
-
-    On Azure with a single deployment (no deployment map), all model names
-    resolve to the same deployment (e.g. ``gpt4o``).  In that case the token
-    budget must reflect the deployment's real capacity, not the requested
-    model's theoretical capacity.
-
-    Falls back to ``get_model_limits(model)`` when running against native
-    OpenAI or when the resolved name has no entry in ``MODEL_TOKEN_LIMITS``.
-    """
-    try:
-        from cmbagent.llm_provider import get_provider_config, resolve_model_for_provider
-        config = get_provider_config()
-        if config.is_azure:
-            resolved = resolve_model_for_provider(model)
-            # If resolved differs from model name, an Azure deployment mapping
-            # kicked in — use the deployment's limits if we recognise it
-            if resolved != model:
-                resolved_limits = get_model_limits(resolved)
-                nominal_limits = get_model_limits(model)
-                # Use the smaller (safer) of the two
-                effective = (
-                    min(resolved_limits[0], nominal_limits[0]),
-                    min(resolved_limits[1], nominal_limits[1]),
-                )
-                if effective != nominal_limits:
-                    logger.info(
-                        "Model '%s' resolves to Azure deployment '%s': "
-                        "using effective limits ctx=%d, out=%d (nominal ctx=%d, out=%d)",
-                        model, resolved,
-                        effective[0], effective[1],
-                        nominal_limits[0], nominal_limits[1],
-                    )
-                return effective
-    except Exception:
-        pass  # any import/config issue -> fall back to nominal limits
-    return get_model_limits(model)
-
-def count_tokens(text: str, model: str = "gpt-4o") -> int:
+def count_tokens(text: str, model: str = None) -> int:
     """
     Count tokens in *text* using tiktoken (for OpenAI models) or a
     character-based heuristic for others.
     """
+    if model is None:
+        model = _default_model()
     try:
         import tiktoken
         # tiktoken only knows OpenAI encodings
@@ -119,11 +90,13 @@ def count_tokens(text: str, model: str = "gpt-4o") -> int:
         return len(text) // 4
 
 
-def count_messages_tokens(messages: List[Dict[str, str]], model: str = "gpt-4o") -> int:
+def count_messages_tokens(messages: List[Dict[str, str]], model: str = None) -> int:
     """
     Estimate total tokens for a list of chat messages.
     Each message has overhead (~4 tokens for role/delimiters).
     """
+    if model is None:
+        model = _default_model()
     total = 0
     for msg in messages:
         total += 4  # role + delimiters overhead

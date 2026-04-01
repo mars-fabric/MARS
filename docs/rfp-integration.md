@@ -20,9 +20,10 @@
 16. [Token Capacity Management](#16-token-capacity-management)
 17. [Dynamic Currency System](#17-dynamic-currency-system)
 18. [Divide-and-Accumulate Strategy (Stage 7)](#18-divide-and-accumulate-strategy-stage-7)
-19. [End-to-End User Flow](#19-end-to-end-user-flow)
-20. [Error Handling](#20-error-handling)
-21. [Multi-Agent System](#21-multi-agent-system)
+19. [Refinement Chat Token Safety](#19-refinement-chat-token-safety)
+20. [End-to-End User Flow](#20-end-to-end-user-flow)
+21. [Error Handling](#21-error-handling)
+22. [Multi-Agent System](#22-multi-agent-system)
 
 ---
 
@@ -32,14 +33,14 @@ The RFP Proposal Generator is a **7-stage, human-in-the-loop AI workflow** in MA
 
 1. **Requirements Analysis** → 2. **Tools & Technology** → 3. **Cloud & Infrastructure** → 4. **Implementation Plan** → 5. **Architecture Design** → 6. **Execution Strategy** → 7. **Proposal Compilation**
 
-Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **3-agent pipeline** (Primary → Specialist → Reviewer: 3 LLM calls per stage when `multi_agent=True`, the default). Users can review and edit AI output between every stage.
+Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **3-agent pipeline** (Primary → Specialist → Reviewer: 3 LLM calls per stage when `multi_agent=True`, the default). Users can review, edit, and refine AI output between every stage.
 
 **Key technologies:**
 - **Backend:** Python, FastAPI, SQLAlchemy, asyncio
 - **Phase System:** `RfpPhaseBase` → 7 phase subclasses with 3-agent pipeline (primary → specialist → reviewer)
 - **Frontend:** React, TypeScript, Next.js
 - **Real-time:** WebSocket + REST polling
-- **Default LLM:** GPT-4.1 / GPT-5.3 (per-stage via `PHASE_AGENT_MODELS` in `agent_teams.py`)
+- **Default LLM:** Dynamic from `WorkflowConfig.default_llm_model` (configurable per stage via `config_overrides`)
 - **Mode:** `"rfp-proposal"`
 
 ---
@@ -127,7 +128,7 @@ mars-ui/
     │   └── RfpProposalTask.tsx # Main 8-step wizard container
     └── rfp/
         ├── RfpSetupPanel.tsx   # Step 0: RFP content + file upload
-        ├── RfpReviewPanel.tsx  # Steps 1–6: edit/preview
+        ├── RfpReviewPanel.tsx  # Steps 1–6: edit/preview + refinement chat
         ├── RfpExecutionPanel.tsx # Per-stage execution monitoring
         └── RfpProposalPanel.tsx # Step 7: final proposal + downloads
 
@@ -301,7 +302,7 @@ RfpPhaseBase.execute(context)
         }
 ```
 
-**Default config:** model=`gpt-4o`, temperature=`0.7`, max_completion_tokens=`16384`, n_reviews=`1`, multi_agent=`True`
+**Default config:** model=dynamic from `WorkflowConfig`, temperature=`0.7`, max_completion_tokens=`16384`, n_reviews=`1`, multi_agent=`True`
 
 With `multi_agent=True` and `n_reviews=1`, each stage makes **3 LLM calls** (1 primary + 1 specialist + 1 review). Total for 7 stages: **21 LLM calls**. Set `multi_agent=False` for the original 2-call generate→review cycle (14 calls).
 
@@ -425,6 +426,7 @@ All endpoints are prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | POST | `/{task_id}/stages/{N}/execute` | Execute stage in background |
 | GET | `/{task_id}/stages/{N}/content` | Get stage output content |
 | PUT | `/{task_id}/stages/{N}/content` | Save user edits |
+| POST | `/{task_id}/stages/{N}/refine` | LLM refinement of content |
 | GET | `/{task_id}/stages/{N}/console` | Console output (polling) |
 | POST | `/{task_id}/reset-from/{N}` | Reset stage N+ back to pending |
 | GET | `/{task_id}/download/{filename}` | Download artifact file |
@@ -448,8 +450,10 @@ All endpoints are prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | `RfpCreateRequest` | Request | `task`, `rfp_context?`, `config?`, `work_dir?` |
 | `RfpExecuteRequest` | Request | `config_overrides?` |
 | `RfpContentUpdateRequest` | Request | `content`, `field` |
+| `RfpRefineRequest` | Request | `message`, `content` |
 | `RfpCreateResponse` | Response | `task_id`, `work_dir`, `stages[]` |
 | `RfpStageContentResponse` | Response | `stage_number`, `status`, `content`, `shared_state` |
+| `RfpRefineResponse` | Response | `refined_content`, `message` |
 | `RfpTaskStateResponse` | Response | Full task state with stages, progress, cost |
 | `RfpRecentTaskResponse` | Response | Summary for resume flow |
 
@@ -469,7 +473,7 @@ Source: `cmbagent/database/models.py`, `cmbagent/database/repository.py`
 | `session_id` | FK → Session |
 | `mode` | `"rfp-proposal"` |
 | `agent` | `"phase_orchestrator"` |
-| `model` | `"gpt-4o"` |
+| `model` | Dynamic from `WorkflowConfig` |
 | `status` | `"executing"` → `"completed"` / `"failed"` |
 | `task_description` | User's RFP text |
 | `meta` | `{ work_dir, rfp_context, config, session_id, orchestration: "phase-based" }` |
@@ -492,7 +496,7 @@ Source: `cmbagent/database/models.py`, `cmbagent/database/repository.py`
 | Column | Description |
 |--------|-------------|
 | `parent_run_id` | FK → WorkflowRun.id |
-| `model` | Model used (e.g., `"gpt-4o"`) |
+| `model` | Model used (from `WorkflowConfig` or `config_overrides`) |
 | `prompt_tokens` | Input tokens |
 | `completion_tokens` | Output tokens |
 | `cost_usd` | Calculated cost |
@@ -545,7 +549,7 @@ Constants: `RFP_STEP_LABELS`, `RFP_WIZARD_STEP_TO_STAGE`, `RFP_STAGE_SHARED_KEYS
 
 `useRfpTask()` provides: `taskId`, `taskState`, `currentStep`, `isExecuting`, `editableContent`, `consoleOutput`, `uploadedFiles`, `lastExtractedText`
 
-Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageContent()`, `uploadFile()`, `resumeTask()`, `deleteTask()`, `resetFromStage()`
+Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageContent()`, `refineContent()`, `uploadFile()`, `resumeTask()`, `deleteTask()`, `resetFromStage()`
 
 ### Wizard Container (`mars-ui/components/tasks/RfpProposalTask.tsx`)
 
@@ -560,7 +564,7 @@ Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageCont
 ### Panel Components
 
 - **RfpSetupPanel** — File upload (above textarea), RFP content textarea (auto-populated from PDF), additional context, "Analyze Requirements" button
-- **RfpReviewPanel** — Full-width editor with preview toggle, auto-save (1s debounce), stage execution monitoring
+- **RfpReviewPanel** — 60% editor/preview + 40% refinement chat, auto-save (1s debounce), stage execution monitoring
 - **RfpProposalPanel** — Success banner, proposal preview, download links for all 7 artifacts
 
 ---
@@ -632,31 +636,30 @@ Each LLM call's token usage is recorded via `CostRepository`:
 
 | Parameter | Default | Notes |
 |-----------|---------|-------|
-| `model` | `gpt-4o` | Configurable via `config_overrides` or `STAGE_MODEL_MAP` (overridden by `PHASE_AGENT_MODELS` when `multi_agent=True`) |
+| `model` | Dynamic (`_default_model()`) | Resolved from `WorkflowConfig.default_llm_model` at runtime; overridable via `config_overrides` |
 | `temperature` | `0.7` | Balanced creativity/consistency (omitted for reasoning models like o3-mini) |
 | `max_completion_tokens` | `16384` | Sufficient for detailed markdown |
 | `n_reviews` | `1` | 1 review pass per stage |
 | `review_model` | `None` (same as model) | Can use a different model for review |
 | `multi_agent` | `True` | Enable 3-agent pipeline (primary → specialist → reviewer). Set `False` for 2-pass generate→review. |
-| `specialist_model` | `None` (per-stage) | Override specialist model; defaults from `PHASE_AGENT_MODELS` in `agent_teams.py` |
+| `specialist_model` | `None` (per-stage) | Override specialist model; defaults from `get_phase_models()` in `agent_teams.py` |
 
-### Stage-to-Model Map (`STAGE_MODEL_MAP`)
+### Stage-to-Model Map (Dynamic)
 
-All stages use `gpt-4o` as the base model.  When `multi_agent=True` (default), these are **overridden** by `PHASE_AGENT_MODELS` from `agent_teams.py`:
+All stages resolve their model dynamically from `WorkflowConfig.default_llm_model` — **no model names are hardcoded**.
 
-| Stage | Primary Model | Specialist Model | Reviewer Model |
-|-------|--------------|-----------------|----------------|
-| 1. Requirements Analysis | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
-| 2. Tools & Technology | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
-| 3. Cloud & Infrastructure | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
-| 4. Implementation Plan | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
-| 5. Architecture Design | GPT-5.3 | GPT-4.1 | GPT-4o |
-| 6. Execution Strategy | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
-| 7. Proposal Compilation | GPT-5.3 | GPT-4.1 | GPT-4o |
+The resolution chain:
+1. `_get_default_rfp_model()` in `backend/routers/rfp.py` reads from `WorkflowConfig`
+2. `_default_model()` in `base.py` reads from `WorkflowConfig` (used by `RfpPhaseConfig.model`)
+3. `_cfg_model()` in `agent_teams.py` reads from `WorkflowConfig` (used by `get_phase_models()`)
+4. `_default_model()` in `token_utils.py` reads from `WorkflowConfig` (used by `count_tokens()` default)
+
+All 7 stages × all 3 agents (primary, specialist, reviewer) use the **same configured model**.
 
 Users can override per-stage via `config_overrides` in the execute request.
 
-> **Azure deployment:** Ensure `AZURE_OPENAI_DEPLOYMENT` is set to your gpt-4o deployment name.
+> **Azure deployment:** Ensure `AZURE_OPENAI_DEPLOYMENT` is set to your deployment name.
+> Set `CMBAGENT_DEFAULT_MODEL` environment variable or update `WorkflowConfig` to change the model for all stages.
 
 ### Available Models (10)
 
@@ -666,7 +669,7 @@ GPT-5.3, GPT-4.1, GPT-4.1 Mini, GPT-4o, GPT-4o Mini, o3-mini, Gemini 2.5 Pro, Ge
 
 ## 16. Token Capacity Management
 
-Source: `cmbagent/phases/rfp/token_utils.py`, integrated in `cmbagent/phases/rfp/base.py` and `cmbagent/phases/rfp/proposal_phase.py`
+Source: `cmbagent/phases/rfp/token_utils.py`, integrated in `cmbagent/phases/rfp/base.py`, `cmbagent/phases/rfp/proposal_phase.py`, and `backend/routers/rfp.py`
 
 ### Problem
 
@@ -674,7 +677,7 @@ Later stages (especially Stage 7 — Proposal Compilation) inject all prior stag
 
 ### Solution: Comprehensive Token Protection at Every LLM Call
 
-**All 10 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are protected with token capacity management:
+**All 11 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are protected with token capacity management:
 
 | # | Call Site | File | Protection |
 |---|-----------|------|------------|
@@ -684,10 +687,11 @@ Later stages (especially Stage 7 — Proposal Compilation) inject all prior stag
 | 4 | Specialist pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
 | 5 | Review pass (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic `max_completion_tokens` cap |
 | 6 | Review pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
-| 7 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic `max_completion_tokens` cap via `get_effective_model_limits` |
+| 7 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic `max_completion_tokens` cap via `get_model_limits` |
 | 8 | Stage 7 specialist | `proposal_phase.py` | `_run_specialist()` (inherited) |
 | 9 | Stage 7 review (single-shot) | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
 | 10 | Stage 7 review (chunked) | `proposal_phase.py` | Per-chunk dynamic cap |
+| 11 | Refinement chat | `rfp.py` | Dynamic cap + content trimming when overflow |
 
 ### Safety Margin: 0.75 (75%)
 
@@ -755,10 +759,10 @@ Unknown models fall back to 128K context / 16K output.
 
 | Function | Purpose |
 |----------|--------|
+| `_default_model()` | Resolves the default model from `WorkflowConfig` (used as fallback for token counting) |
 | `get_model_limits(model)` | Returns `(max_context, max_output)` for a model |
-| `get_effective_model_limits(model)` | Azure-aware wrapper: returns `min(nominal, deployment)` limits when Azure uses a single deployment for all models |
-| `count_tokens(text, model)` | Count tokens using tiktoken (fallback: chars÷4) |
-| `count_messages_tokens(messages, model)` | Count tokens for a chat message list |
+| `count_tokens(text, model)` | Count tokens using tiktoken (fallback: chars÷4). Model defaults to `_default_model()` if not provided |
+| `count_messages_tokens(messages, model)` | Count tokens for a chat message list. Model defaults to `_default_model()` if not provided |
 | `chunk_prompt_if_needed(system, user, model, max_completion, safety_margin)` | Returns `None` (fits) or `List[str]` (chunks) |
 | `group_sources_by_budget(sources, base_tokens, model, max_completion, safety_margin)` | Group source keys into batches that fit context (used by Stage 7) |
 
@@ -780,46 +784,56 @@ During execution, the token budget and chunking decisions are logged to the cons
 
 ## 17. Dynamic Currency System
 
-Source: `cmbagent/phases/rfp/requirements_phase.py` (extraction), `cmbagent/phases/rfp/base.py` (rule generation), all phase classes (consumption)
+Source: `cmbagent/phases/rfp/requirements_phase.py` (extraction), `cmbagent/phases/rfp/base.py` (3-pass detection + automatic injection)
 
 ### Problem
 
 Previously, all cost figures were hardcoded to USD ($). Clients submitting RFPs in EUR, GBP, INR, or other currencies would receive proposals with incorrect currency.
 
-### Solution: Extract Currency from RFP, Propagate Through All Stages
+### Solution: 3-Pass Currency Detection + Automatic Injection
 
 **Stage 1 (Requirements Analysis)** extracts the currency from the RFP document:
 
 ```
 10. **Currency** — Identify the currency used in the RFP (e.g., USD, EUR, GBP, INR).
     Look for currency symbols ($, €, £, ₹), currency codes, or country context.
+    Search the ENTIRE RFP including payment terms, billing clauses, and annexures.
     Output:
     ## Currency
     **Primary Currency:** <CODE> (<SYMBOL>)
     If no currency is explicitly stated, default to USD ($).
 ```
 
-**`RfpPhaseBase.get_currency_rule(context)`** parses the Stage 1 output and generates a currency instruction string:
+**`RfpPhaseBase.get_currency_rule(context)`** uses a robust **3-pass detection** system:
 
-```python
-@staticmethod
-def get_currency_rule(context: PhaseContext) -> str:
-    # Regex: **Primary Currency:** USD ($)
-    m = re.search(r"\*\*Primary Currency:\*\*\s*([A-Z]{3})\s*\(([^)]+)\)", reqs)
-    code, symbol = m.group(1), m.group(2)  # or defaults to USD ($)
-    return f"CURRENCY RULE: ALL monetary values MUST be in {code} ({symbol}) only..."
+```
+Pass 1: Scan requirements analysis for structured output
+  - Pattern A: **Primary Currency:** INR (₹)
+  - Pattern B: looser — "Currency: INR" or "Payment — INR"
+
+Pass 2: Scan original RFP text for explicit currency mentions
+  - Currency names: "Indian Rupees", "British Pounds", etc.
+  - ISO codes: INR, EUR, GBP, AUD, etc.
+  - Currency symbols: ₹, €, £
+
+Pass 3: Fallback to USD ($) only if no signal found in Pass 1 or 2
 ```
 
-**All cost-producing stages** inject this rule into their prompts:
+Supported currencies: USD, EUR, GBP, INR, AUD, CAD, JPY, CNY, SGD, AED, SAR, CHF.
 
-| Stage | Phase Class | Currency Integration |
-|-------|-------------|---------------------|
-| 2 | `RfpToolsPhase` | `{self.get_currency_rule(context)}` in `build_user_prompt()` |
-| 3 | `RfpCloudPhase` | `{self.get_currency_rule(context)}` in `build_user_prompt()` |
-| 4 | `RfpImplementationPhase` | `{self.get_currency_rule(context)}` in `build_user_prompt()` |
-| 7 | `RfpProposalPhase` | `{self.get_currency_rule(context)}` in both `_build_full_prompt()` and `_build_partial_prompt()` |
+**Automatic injection at base class level** — no individual phase can miss it:
 
-The review system prompt uses generic "single consistent currency" language (item 9) so it validates whatever currency was selected.
+| Agent | Injection Point | Code Location |
+|-------|----------------|---------------|
+| **Primary Agent** | Appended to `build_user_prompt()` output | `execute()` in `base.py` |
+| **Specialist Agent** | Appended to specialist validation prompt | `_run_specialist()` in `base.py` |
+| **Reviewer Agent** | Appended to review prompt | Review loop in `execute()` |
+
+This means **all 7 stages × all 3 agents** (21 LLM calls) enforce the correct currency.
+
+Additionally, individual phases (Tools, Cloud, Implementation, Proposal) include the currency rule explicitly in their `build_user_prompt()` — this is redundant but harmless (reinforced).
+
+The review system prompt also uses generic "single consistent currency" language (item 9) so it validates whatever currency was selected.
 
 ---
 
@@ -897,7 +911,35 @@ Each source is mapped to specific proposal sections via `_SOURCE_TO_SECTIONS`:
 
 ---
 
-## 19. End-to-End User Flow
+## 19. Refinement Chat Token Safety
+
+Source: `backend/routers/rfp.py` — `refine_rfp_content()` endpoint
+
+### Problem
+
+The refinement chat (`POST /{task_id}/stages/{N}/refine`) sends the full stage content + user instruction to the LLM. For large stage outputs (especially Stage 7), this could exceed the model's context window and cause `ECONNRESET` or API errors.
+
+### Solution
+
+The refine endpoint now has:
+
+1. **`timeout=300`** on the OpenAI client to prevent connection resets
+2. **Dynamic `max_completion_tokens` capping** — same approach as phase execution
+3. **Content trimming** — if the content exceeds the usable context, it is trimmed by taking the start and end of the content (preserving context from both halves) using tiktoken token-level encoding/decoding
+
+```python
+# If content is too large, trim to fit — take start + end
+usable_for_content = int(max_ctx * 0.75) - sys_tokens - instruction_tokens - max_comp - 200
+if content_tokens > usable_for_content:
+    tokens = enc.encode(content)
+    half = usable_for_content // 2
+    trimmed_tokens = tokens[:half] + tokens[-half:]
+    trimmed_content = enc.decode(trimmed_tokens)
+```
+
+---
+
+## 20. End-to-End User Flow
 
 ### Step 0: Setup
 1. User selects "RFP Proposal Generator" on Tasks page
@@ -907,8 +949,8 @@ Each source is mapped to specific proposal sections via `_SOURCE_TO_SECTIONS`:
 ### Steps 1–6: Iterative Review
 1. Stage executes in background (`_run_rfp_stage` → `phase.execute()`)
 2. Live console output via WebSocket
-3. On completion: full-width markdown editor with preview toggle
-4. User reviews and edits directly → clicks "Next" → saves edits → triggers next stage
+3. On completion: split-view editor (60%) + refinement chat (40%)
+4. User reviews, edits, refines → clicks "Next" → saves edits → triggers next stage
 
 ### Step 7: Proposal Compilation
 1. `executeStage(7)` — all 6 prior outputs injected into prompt
@@ -917,7 +959,7 @@ Each source is mapped to specific proposal sections via `_SOURCE_TO_SECTIONS`:
 
 ---
 
-## 20. Error Handling
+## 21. Error Handling
 
 Stages fail for: LLM errors (empty response, API failure), infrastructure issues (rate limits, network), or data issues (missing shared state).
 
@@ -933,7 +975,7 @@ Failures are: stored in `TaskStage.error_message`, logged with full traceback, s
 
 ---
 
-## 21. Multi-Agent System
+## 22. Multi-Agent System
 
 Source: `cmbagent/phases/rfp/agent_teams.py`, `cmbagent/phases/rfp/base.py`
 
@@ -948,17 +990,17 @@ Primary Agent → Specialist Agent → Reviewer Agent
 
 - `multi_agent=True` (default) — enables the 3-agent pipeline
 - `multi_agent=False` — reverts to the original 2-pass (generate → review) cycle
-- `specialist_model` — override the specialist model for a specific phase (defaults from `PHASE_AGENT_MODELS`)
+- `specialist_model` — override the specialist model for a specific phase (defaults from `get_phase_models()`)
 
-### Model Assignments (`PHASE_AGENT_MODELS`)
+### Model Assignments (Dynamic)
 
-Defined in `agent_teams.py`. Models are optimised per agent role:
+Defined in `agent_teams.py`. All agent roles use the **same model**, resolved dynamically from `WorkflowConfig.default_llm_model`:
 
 | Stage | Primary | Specialist | Reviewer |
 |-------|---------|-----------|----------|
-| 1–4, 6 | GPT-4.1 | GPT-4.1 Mini | GPT-4o |
-| 5 (Architecture) | GPT-5.3 | GPT-4.1 | GPT-4o |
-| 7 (Proposal) | GPT-5.3 | GPT-4.1 | GPT-4o |
+| All (1–7) | (config) | (config) | (config) |
+
+> **(config)** = `WorkflowConfig.default_llm_model`. Change in one place → changes everywhere.
 
 ### Token Safety
 
