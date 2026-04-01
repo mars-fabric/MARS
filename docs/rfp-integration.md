@@ -20,10 +20,9 @@
 16. [Token Capacity Management](#16-token-capacity-management)
 17. [Dynamic Currency System](#17-dynamic-currency-system)
 18. [Divide-and-Accumulate Strategy (Stage 7)](#18-divide-and-accumulate-strategy-stage-7)
-19. [Refinement Chat Token Safety](#19-refinement-chat-token-safety)
-20. [End-to-End User Flow](#20-end-to-end-user-flow)
-21. [Error Handling](#21-error-handling)
-22. [Multi-Agent System](#22-multi-agent-system)
+19. [End-to-End User Flow](#19-end-to-end-user-flow)
+20. [Error Handling](#20-error-handling)
+21. [Multi-Agent System](#21-multi-agent-system)
 
 ---
 
@@ -33,7 +32,7 @@ The RFP Proposal Generator is a **7-stage, human-in-the-loop AI workflow** in MA
 
 1. **Requirements Analysis** → 2. **Tools & Technology** → 3. **Cloud & Infrastructure** → 4. **Implementation Plan** → 5. **Architecture Design** → 6. **Execution Strategy** → 7. **Proposal Compilation**
 
-Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **3-agent pipeline** (Primary → Specialist → Reviewer: 3 LLM calls per stage when `multi_agent=True`, the default). Users can review, edit, and refine AI output between every stage.
+Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **3-agent pipeline** (Primary → Specialist → Reviewer: 3 LLM calls per stage when `multi_agent=True`, the default). Users can review and edit AI output between every stage.
 
 **Key technologies:**
 - **Backend:** Python, FastAPI, SQLAlchemy, asyncio
@@ -128,7 +127,7 @@ mars-ui/
     │   └── RfpProposalTask.tsx # Main 8-step wizard container
     └── rfp/
         ├── RfpSetupPanel.tsx   # Step 0: RFP content + file upload
-        ├── RfpReviewPanel.tsx  # Steps 1–6: edit/preview + refinement chat
+        ├── RfpReviewPanel.tsx  # Steps 1–6: edit/preview
         ├── RfpExecutionPanel.tsx # Per-stage execution monitoring
         └── RfpProposalPanel.tsx # Step 7: final proposal + downloads
 
@@ -426,7 +425,6 @@ All endpoints are prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | POST | `/{task_id}/stages/{N}/execute` | Execute stage in background |
 | GET | `/{task_id}/stages/{N}/content` | Get stage output content |
 | PUT | `/{task_id}/stages/{N}/content` | Save user edits |
-| POST | `/{task_id}/stages/{N}/refine` | LLM refinement of content |
 | GET | `/{task_id}/stages/{N}/console` | Console output (polling) |
 | POST | `/{task_id}/reset-from/{N}` | Reset stage N+ back to pending |
 | GET | `/{task_id}/download/{filename}` | Download artifact file |
@@ -450,10 +448,8 @@ All endpoints are prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | `RfpCreateRequest` | Request | `task`, `rfp_context?`, `config?`, `work_dir?` |
 | `RfpExecuteRequest` | Request | `config_overrides?` |
 | `RfpContentUpdateRequest` | Request | `content`, `field` |
-| `RfpRefineRequest` | Request | `message`, `content` |
 | `RfpCreateResponse` | Response | `task_id`, `work_dir`, `stages[]` |
 | `RfpStageContentResponse` | Response | `stage_number`, `status`, `content`, `shared_state` |
-| `RfpRefineResponse` | Response | `refined_content`, `message` |
 | `RfpTaskStateResponse` | Response | Full task state with stages, progress, cost |
 | `RfpRecentTaskResponse` | Response | Summary for resume flow |
 
@@ -549,7 +545,7 @@ Constants: `RFP_STEP_LABELS`, `RFP_WIZARD_STEP_TO_STAGE`, `RFP_STAGE_SHARED_KEYS
 
 `useRfpTask()` provides: `taskId`, `taskState`, `currentStep`, `isExecuting`, `editableContent`, `consoleOutput`, `uploadedFiles`, `lastExtractedText`
 
-Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageContent()`, `refineContent()`, `uploadFile()`, `resumeTask()`, `deleteTask()`, `resetFromStage()`
+Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageContent()`, `uploadFile()`, `resumeTask()`, `deleteTask()`, `resetFromStage()`
 
 ### Wizard Container (`mars-ui/components/tasks/RfpProposalTask.tsx`)
 
@@ -564,7 +560,7 @@ Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageCont
 ### Panel Components
 
 - **RfpSetupPanel** — File upload (above textarea), RFP content textarea (auto-populated from PDF), additional context, "Analyze Requirements" button
-- **RfpReviewPanel** — 60% editor/preview + 40% refinement chat, auto-save (1s debounce), stage execution monitoring
+- **RfpReviewPanel** — Full-width editor with preview toggle, auto-save (1s debounce), stage execution monitoring
 - **RfpProposalPanel** — Success banner, proposal preview, download links for all 7 artifacts
 
 ---
@@ -670,7 +666,7 @@ GPT-5.3, GPT-4.1, GPT-4.1 Mini, GPT-4o, GPT-4o Mini, o3-mini, Gemini 2.5 Pro, Ge
 
 ## 16. Token Capacity Management
 
-Source: `cmbagent/phases/rfp/token_utils.py`, integrated in `cmbagent/phases/rfp/base.py`, `cmbagent/phases/rfp/proposal_phase.py`, and `backend/routers/rfp.py`
+Source: `cmbagent/phases/rfp/token_utils.py`, integrated in `cmbagent/phases/rfp/base.py` and `cmbagent/phases/rfp/proposal_phase.py`
 
 ### Problem
 
@@ -678,7 +674,7 @@ Later stages (especially Stage 7 — Proposal Compilation) inject all prior stag
 
 ### Solution: Comprehensive Token Protection at Every LLM Call
 
-**All 11 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are protected with token capacity management:
+**All 10 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are protected with token capacity management:
 
 | # | Call Site | File | Protection |
 |---|-----------|------|------------|
@@ -688,11 +684,10 @@ Later stages (especially Stage 7 — Proposal Compilation) inject all prior stag
 | 4 | Specialist pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
 | 5 | Review pass (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic `max_completion_tokens` cap |
 | 6 | Review pass (chunked) | `base.py` | Per-chunk dynamic `max_completion_tokens` cap |
-| 7 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic `max_completion_tokens` cap via `get_model_limits` |
+| 7 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic `max_completion_tokens` cap via `get_effective_model_limits` |
 | 8 | Stage 7 specialist | `proposal_phase.py` | `_run_specialist()` (inherited) |
 | 9 | Stage 7 review (single-shot) | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
 | 10 | Stage 7 review (chunked) | `proposal_phase.py` | Per-chunk dynamic cap |
-| 11 | Refinement chat | `rfp.py` | Dynamic cap + content trimming when overflow |
 
 ### Safety Margin: 0.75 (75%)
 
@@ -761,6 +756,7 @@ Unknown models fall back to 128K context / 16K output.
 | Function | Purpose |
 |----------|--------|
 | `get_model_limits(model)` | Returns `(max_context, max_output)` for a model |
+| `get_effective_model_limits(model)` | Azure-aware wrapper: returns `min(nominal, deployment)` limits when Azure uses a single deployment for all models |
 | `count_tokens(text, model)` | Count tokens using tiktoken (fallback: chars÷4) |
 | `count_messages_tokens(messages, model)` | Count tokens for a chat message list |
 | `chunk_prompt_if_needed(system, user, model, max_completion, safety_margin)` | Returns `None` (fits) or `List[str]` (chunks) |
@@ -901,35 +897,7 @@ Each source is mapped to specific proposal sections via `_SOURCE_TO_SECTIONS`:
 
 ---
 
-## 19. Refinement Chat Token Safety
-
-Source: `backend/routers/rfp.py` — `refine_rfp_content()` endpoint
-
-### Problem
-
-The refinement chat (`POST /{task_id}/stages/{N}/refine`) sends the full stage content + user instruction to the LLM. For large stage outputs (especially Stage 7), this could exceed the model's context window and cause `ECONNRESET` or API errors.
-
-### Solution
-
-The refine endpoint now has:
-
-1. **`timeout=300`** on the OpenAI client to prevent connection resets
-2. **Dynamic `max_completion_tokens` capping** — same approach as phase execution
-3. **Content trimming** — if the content exceeds the usable context, it is trimmed by taking the start and end of the content (preserving context from both halves) using tiktoken token-level encoding/decoding
-
-```python
-# If content is too large, trim to fit — take start + end
-usable_for_content = int(max_ctx * 0.75) - sys_tokens - instruction_tokens - max_comp - 200
-if content_tokens > usable_for_content:
-    tokens = enc.encode(content)
-    half = usable_for_content // 2
-    trimmed_tokens = tokens[:half] + tokens[-half:]
-    trimmed_content = enc.decode(trimmed_tokens)
-```
-
----
-
-## 20. End-to-End User Flow
+## 19. End-to-End User Flow
 
 ### Step 0: Setup
 1. User selects "RFP Proposal Generator" on Tasks page
@@ -939,8 +907,8 @@ if content_tokens > usable_for_content:
 ### Steps 1–6: Iterative Review
 1. Stage executes in background (`_run_rfp_stage` → `phase.execute()`)
 2. Live console output via WebSocket
-3. On completion: split-view editor (60%) + refinement chat (40%)
-4. User reviews, edits, refines → clicks "Next" → saves edits → triggers next stage
+3. On completion: full-width markdown editor with preview toggle
+4. User reviews and edits directly → clicks "Next" → saves edits → triggers next stage
 
 ### Step 7: Proposal Compilation
 1. `executeStage(7)` — all 6 prior outputs injected into prompt
@@ -949,7 +917,7 @@ if content_tokens > usable_for_content:
 
 ---
 
-## 21. Error Handling
+## 20. Error Handling
 
 Stages fail for: LLM errors (empty response, API failure), infrastructure issues (rate limits, network), or data issues (missing shared state).
 
@@ -965,7 +933,7 @@ Failures are: stored in `TaskStage.error_message`, logged with full traceback, s
 
 ---
 
-## 22. Multi-Agent System
+## 21. Multi-Agent System
 
 Source: `cmbagent/phases/rfp/agent_teams.py`, `cmbagent/phases/rfp/base.py`
 

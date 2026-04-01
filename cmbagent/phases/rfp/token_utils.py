@@ -61,6 +61,46 @@ def get_model_limits(model: str) -> Tuple[int, int]:
     return (DEFAULT_CONTEXT_LIMIT, DEFAULT_OUTPUT_LIMIT)
 
 
+
+def get_effective_model_limits(model: str) -> Tuple[int, int]:
+    """Return token limits for the **actual** model that will serve the request.
+
+    On Azure with a single deployment (no deployment map), all model names
+    resolve to the same deployment (e.g. ``gpt4o``).  In that case the token
+    budget must reflect the deployment's real capacity, not the requested
+    model's theoretical capacity.
+
+    Falls back to ``get_model_limits(model)`` when running against native
+    OpenAI or when the resolved name has no entry in ``MODEL_TOKEN_LIMITS``.
+    """
+    try:
+        from cmbagent.llm_provider import get_provider_config, resolve_model_for_provider
+        config = get_provider_config()
+        if config.is_azure:
+            resolved = resolve_model_for_provider(model)
+            # If resolved differs from model name, an Azure deployment mapping
+            # kicked in — use the deployment's limits if we recognise it
+            if resolved != model:
+                resolved_limits = get_model_limits(resolved)
+                nominal_limits = get_model_limits(model)
+                # Use the smaller (safer) of the two
+                effective = (
+                    min(resolved_limits[0], nominal_limits[0]),
+                    min(resolved_limits[1], nominal_limits[1]),
+                )
+                if effective != nominal_limits:
+                    logger.info(
+                        "Model '%s' resolves to Azure deployment '%s': "
+                        "using effective limits ctx=%d, out=%d (nominal ctx=%d, out=%d)",
+                        model, resolved,
+                        effective[0], effective[1],
+                        nominal_limits[0], nominal_limits[1],
+                    )
+                return effective
+    except Exception:
+        pass  # any import/config issue -> fall back to nominal limits
+    return get_model_limits(model)
+
 def count_tokens(text: str, model: str = "gpt-4o") -> int:
     """
     Count tokens in *text* using tiktoken (for OpenAI models) or a

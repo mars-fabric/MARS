@@ -3,7 +3,6 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Eye, Edit3, ArrowRight, ArrowLeft, Play, Loader2 } from 'lucide-react'
 import { Button } from '@/components/core'
-import RefinementChat from '@/components/deepresearch/RefinementChat'
 import ExecutionProgress from '@/components/deepresearch/ExecutionProgress'
 import MarkdownRenderer from '@/components/files/MarkdownRenderer'
 import type { useRfpTask } from '@/hooks/useRfpTask'
@@ -29,13 +28,11 @@ export default function RfpReviewPanel({
         taskState,
         editableContent,
         setEditableContent,
-        refinementMessages,
         consoleOutput,
         isExecuting,
         executeStage,
         fetchStageContent,
         saveStageContent,
-        refineContent,
     } = hook
 
     const [mode, setMode] = useState<'edit' | 'preview'>('edit')
@@ -73,19 +70,6 @@ export default function RfpReviewPanel({
             }
         }, 1000)
     }, [canEdit, saveStageContent, setEditableContent, stageNum, sharedKey])
-
-    // Refinement handler
-    const handleRefine = useCallback(async (message: string) => {
-        return refineContent(stageNum, message, editableContent)
-    }, [refineContent, stageNum, editableContent])
-
-    // Apply refined content from chat
-    const handleApply = useCallback((content: string) => {
-        setEditableContent(content)
-        if (canEdit) {
-            saveStageContent(stageNum, content, sharedKey)
-        }
-    }, [setEditableContent, canEdit, saveStageContent, stageNum, sharedKey])
 
     // Handle next — also auto-triggers next stage
     const handleNext = useCallback(async () => {
@@ -182,9 +166,9 @@ export default function RfpReviewPanel({
 
     // Review state: content available for editing
     return (
-        <div className="flex gap-4" style={{ minHeight: '600px' }}>
-            {/* Main editor/preview (60%) */}
-            <div className="flex-1 min-w-0 space-y-3">
+        <div className="space-y-3" style={{ minHeight: '600px' }}>
+            {/* Main editor/preview */}
+            <div className="space-y-3">
                 {/* Top bar */}
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1">
@@ -251,22 +235,6 @@ export default function RfpReviewPanel({
                         <ArrowRight className="w-4 h-4 ml-1" />
                     </Button>
                 </div>
-            </div>
-
-            {/* Refinement chat (40%) */}
-            <div
-                className="w-[360px] flex-shrink-0 border rounded-mars-md overflow-hidden"
-                style={{
-                    borderColor: 'var(--mars-color-border)',
-                    backgroundColor: 'var(--mars-color-surface)',
-                }}
-            >
-                <RefinementChat
-                    messages={refinementMessages}
-                    onSend={handleRefine}
-                    onApply={handleApply}
-                    isLoading={isExecuting}
-                />
             </div>
         </div>
     )

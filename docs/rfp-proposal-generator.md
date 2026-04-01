@@ -59,7 +59,7 @@ Starting from an RFP document, the system outputs:
 | **Real-time feedback** | WebSocket streaming + REST polling deliver live console output during execution |
 | **Resumable** | Tasks persist in a database and can be resumed after page reloads or interruptions |
 | **Cost-transparent** | Per-LLM-call cost tracking is aggregated and displayed throughout the workflow |
-| **Editable at every stage** | Split-view editor (60% preview + 40% refinement chat) |
+| **Editable at every stage** | Full-width markdown editor with preview toggle |
 | **Token-safe** | Every LLM call has dynamic `max_completion_tokens` capping and automatic prompt chunking (0.75 safety margin) |
 | **Dynamic currency** | Currency is extracted from the RFP (Stage 1) and propagated to all cost-producing stages; defaults to USD ($) |
 | **Zero data loss** | Stage 7 uses a divide-and-accumulate strategy — no source data is ever truncated, condensed, or dropped |
@@ -138,9 +138,8 @@ The RFP Proposal Generator is an **8-step wizard** in the UI, mapping to **7 bac
 
 | Feature | Details |
 |---|---|
-| **Split view** | 60% markdown editor/preview + 40% refinement chat |
+| **Editor** | Full-width markdown editor with preview toggle |
 | **Auto-save** | Content saved to DB + disk after 1s debounce on edit |
-| **AI refinement** | User types instruction → LLM refines content → user clicks "Apply" |
 | **Next button** | Saves edits, then triggers next stage's phase execution |
 | **Execution progress** | Real-time console output via WebSocket + timer + cost display |
 
@@ -226,17 +225,12 @@ hook.executeStage(N, taskId)                              [useRfpTask.ts]
 WebSocket receives "stage_completed"
   │
   ├── fetchStageContent(N) → loads generated content into editor
-  ├── Split-view: Editor/Preview (60%) + Refinement Chat (40%)
+  ├── Full-width markdown editor with preview toggle
   │
   ├── USER ACTIONS:
   │     ├── Edit markdown directly → auto-save after 1s debounce
   │     │     └── PUT /api/rfp/{id}/stages/{N}/content
   │     │           → updates DB shared_state + rewrites .md file
-  │     │
-  │     ├── Use Refinement Chat → AI improves content
-  │     │     └── POST /api/rfp/{id}/stages/{N}/refine
-  │     │           → LLM call with "Refine this content based on: {instruction}"
-  │     │           → User clicks "Apply" to accept
   │     │
   │     └── Click "Next" → saves edits → auto-triggers next phase execution
   │
@@ -324,7 +318,7 @@ Each task creates:
 | **Session** | 1 | Groups all records; supports suspend/resume (mode="rfp-proposal") |
 | **WorkflowRun** | 1 | Parent task record (mode, status, work_dir, config, task_description) |
 | **TaskStage** | 7 | One per stage (status, input_data, output_data, timing, error_message) |
-| **CostRecord** | 21+ | One per LLM call: 7 stages × 3 agents (primary + specialist + reviewer) + Stage 7 divide-and-accumulate calls + any refinement calls |
+| **CostRecord** | 21+ | One per LLM call: 7 stages × 3 agents (primary + specialist + reviewer) + Stage 7 divide-and-accumulate calls |
 
 ### 4.3 Shared State — Cumulative Context
 
@@ -449,24 +443,13 @@ The shared review prompt (inherited from `RfpPhaseBase`) enforces:
 12. Verify appendices contain REAL content (full tables, glossary entries, references)
 13. Ensure the document reads as a polished enterprise proposal — not an AI summary
 
-### 5.5 Human-in-the-Loop Refinement
+### 5.5 Human-in-the-Loop Editing
 
 Between every stage, users can:
-- **Direct edit** — Modify the generated markdown in the split-view editor
-- **AI refinement** — Give natural language instructions to improve content
+- **Direct edit** — Modify the generated markdown in the full-width editor with preview toggle
+- **Auto-save** — Edits are saved to both DB and filesystem after a 1-second debounce
 
-The refinement uses a **separate LLM call** with a dedicated system prompt and full **token safety protection**:
-
-```
-System: "You are a technical proposal consultant. Refine the following content
-         based on the user's instruction. Return ONLY the refined markdown
-         content, no explanations."
-User:   "Current content:\n\n{content}\n\n---\n\nInstruction: {user_message}"
-```
-
-Model: `gpt-4o`, Temperature: `0.7`, Max completion tokens: dynamically capped
-
-**Token safety:** The refine endpoint checks token capacity before calling the LLM. If the content exceeds the usable context window, it is **trimmed** by taking the start and end of the content (preserving context from both halves) using tiktoken token-level encoding/decoding. The OpenAI client uses `timeout=300` to prevent connection resets on large content.
+All edits flow forward: the next stage reads the human-edited version from shared_state.
 
 ### 5.6 File Context Augmentation
 
@@ -580,7 +563,7 @@ _ConsoleCapture (per stage)
 │                                                                     │
 │  TaskList.tsx → RfpProposalTask.tsx (8-step wizard)                 │
 │    ├── RfpSetupPanel.tsx     (Step 0: input + upload)               │
-│    ├── RfpReviewPanel.tsx    (Steps 1–6: edit + refine)             │
+│    ├── RfpReviewPanel.tsx    (Steps 1–6: edit + preview)            │
 │    ├── RfpExecutionPanel.tsx (per-stage progress + console)         │
 │    └── RfpProposalPanel.tsx  (Step 7: final proposal + download)    │
 │                                                                     │
@@ -603,7 +586,6 @@ _ConsoleCapture (per stage)
 │    │     ├── await phase.execute(ctx) → generate → review           │
 │    │     ├── CostRepository.record_cost(...)                        │
 │    │     └── TaskStageRepository.update_stage_status(...)           │
-│    ├── refine_rfp_content() → separate LLM call                    │
 │    └── reset_from_stage()   → reset to pending, delete files        │
 │                                                                     │
 │  main.py → WebSocket /ws/rfp/{task_id}/{stage_num}                  │
@@ -647,7 +629,6 @@ All endpoints prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | POST | `/{id}/stages/{N}/execute` | Execute stage via phase class |
 | GET | `/{id}/stages/{N}/content` | Get stage output content |
 | PUT | `/{id}/stages/{N}/content` | Save user edits (DB + file) |
-| POST | `/{id}/stages/{N}/refine` | LLM refinement of content |
 | GET | `/{id}/stages/{N}/console` | Console output lines (polling) |
 | POST | `/{id}/reset-from/{N}` | Reset stage N+ to pending, delete files |
 | GET | `/{id}/download/{filename}` | Download artifact (validated filename) |
@@ -717,7 +698,7 @@ Override the model per stage via `config_overrides` in the execute request:
 
 | Variable | Required? | Used By |
 |---|---|---|
-| `OPENAI_API_KEY` | **Yes** | All 7 stages (generation + review) + refinement |
+| `OPENAI_API_KEY` | **Yes** | All 7 stages (generation + review) |
 | `ANTHROPIC_API_KEY` | Optional | If using Anthropic models via override |
 | `GOOGLE_API_KEY` | Optional | If using Gemini models via override |
 
@@ -815,8 +796,8 @@ WHERE parent_run_id = '{task_id}' ORDER BY stage_number;
 | **TaskStageRepository** | CRUD operations for stage records in the database |
 | **SessionManager** | Service for creating and managing sessions |
 | **Stepper** | UI component showing the 8-step wizard progress indicator |
-| **RefinementChat** | AI-powered chat sidebar for iterative content improvement |
-| **Split-View Editor** | 60% markdown editor/preview + 40% refinement chat layout |
+| **RefinementChat** | *(Removed)* — Previously an AI-powered chat sidebar for iterative content improvement; removed in favour of direct markdown editing |
+| **Split-View Editor** | *(Removed)* — Previously 60% markdown editor + 40% refinement chat; replaced with full-width markdown editor with preview toggle |
 | **Token capacity management** | System that prevents context window overflow at every LLM call via dynamic capping, prompt chunking, and 0.75 safety margin |
 | **Safety margin (0.75)** | Fraction of model context window used for budget calculation — accounts for tiktoken undercounting by 10–20% |
 | **Dynamic currency** | Currency code and symbol extracted from the RFP at Stage 1, propagated to all cost-producing stages |
@@ -852,7 +833,6 @@ This section provides an exhaustive trace of every class, function, database mod
 │              │    └── "Analyze Requirements" button                  │
 │              ├── Steps 1-6: RfpReviewPanel.tsx (×6 instances)        │
 │              │    ├── Markdown editor / preview toggle               │
-│              │    ├── RefinementChat sidebar (AI-assisted editing)   │
 │              │    ├── Auto-save with debounce                        │
 │              │    └── "Next" → auto-triggers next phase execution    │
 │              └── Step 7: RfpProposalPanel.tsx                        │
@@ -864,7 +844,6 @@ This section provides an exhaustive trace of every class, function, database mod
 │    ├── executeStage()  → POST /api/rfp/{id}/stages/{n}/execute      │
 │    ├── fetchContent()  → GET  /api/rfp/{id}/stages/{n}/content      │
 │    ├── saveContent()   → PUT  /api/rfp/{id}/stages/{n}/content      │
-│    ├── refineContent() → POST /api/rfp/{id}/stages/{n}/refine       │
 │    ├── resetFromStage()→ POST /api/rfp/{id}/reset-from/{n}          │
 │    ├── connectWs()     → ws://host/ws/rfp/{id}/{n}                  │
 │    ├── startPolling()  → GET  /api/rfp/{id} (every 5s)              │
@@ -891,8 +870,6 @@ This section provides an exhaustive trace of every class, function, database mod
 │    │                          → CostRepository.record_cost()        │
 │    │                          → TaskStageRepository.update_status()  │
 │    │                          → write .md file to disk               │
-│    ├── refine_rfp_content()   → create_openai_client()              │
-│    │                          → asyncio.to_thread(refinement call)  │
 │    └── reset_from_stage()     → reset to pending, delete files      │
 │                                                                     │
 │  backend/main.py                                                    │
@@ -941,6 +918,7 @@ This section provides an exhaustive trace of every class, function, database mod
 | Function | Purpose |
 |---|---|
 | **`get_model_limits(model)`** | Returns `(max_context, max_output)` for a model; prefix match + fallback |
+| **`get_effective_model_limits(model)`** | Azure-aware wrapper: returns `min(nominal, deployment)` limits when Azure uses a single deployment for all models |
 | **`count_tokens(text, model)`** | Token count via tiktoken (fallback: chars÷4) |
 | **`count_messages_tokens(messages, model)`** | Token count for chat message lists |
 | **`chunk_prompt_if_needed(...)`** | Returns `None` (fits) or `List[str]` (chunks split at `---` boundaries) |
@@ -955,11 +933,9 @@ This section provides an exhaustive trace of every class, function, database mod
 | **`RfpCreateRequest`** | `models/rfp_schemas.py` | Pydantic model: `task`, `rfp_context`, `config`, `work_dir` |
 | **`RfpExecuteRequest`** | `models/rfp_schemas.py` | Pydantic model: `config_overrides` |
 | **`RfpContentUpdateRequest`** | `models/rfp_schemas.py` | Pydantic model: `content`, `field` |
-| **`RfpRefineRequest`** | `models/rfp_schemas.py` | Pydantic model: `message`, `content` |
 | **`RfpStageResponse`** | `models/rfp_schemas.py` | Stage info: number, name, status, timestamps, error |
 | **`RfpCreateResponse`** | `models/rfp_schemas.py` | `task_id`, `work_dir`, `stages[]` |
 | **`RfpStageContentResponse`** | `models/rfp_schemas.py` | Stage content: `content`, `shared_state`, `output_files` |
-| **`RfpRefineResponse`** | `models/rfp_schemas.py` | `refined_content`, `message` |
 | **`RfpTaskStateResponse`** | `models/rfp_schemas.py` | Full state: `stages[]`, `progress_percent`, `total_cost_usd` |
 | **`RfpRecentTaskResponse`** | `models/rfp_schemas.py` | Resume flow: `task_id`, `task`, `status`, `current_stage` |
 
@@ -993,10 +969,9 @@ This section provides an exhaustive trace of every class, function, database mod
 |---|---|---|
 | **`RfpProposalTask`** | `components/tasks/RfpProposalTask.tsx` | 8-step wizard container with Stepper navigation |
 | **`RfpSetupPanel`** | `components/rfp/RfpSetupPanel.tsx` | Step 0: file upload, RFP text, context, submit |
-| **`RfpReviewPanel`** | `components/rfp/RfpReviewPanel.tsx` | Steps 1–6: split-view editor + refinement chat |
+| **`RfpReviewPanel`** | `components/rfp/RfpReviewPanel.tsx` | Steps 1–6: full-width editor with preview toggle |
 | **`RfpExecutionPanel`** | `components/rfp/RfpExecutionPanel.tsx` | Stage execution progress with timer and cost |
 | **`RfpProposalPanel`** | `components/rfp/RfpProposalPanel.tsx` | Step 7: proposal preview + download artifacts |
-| **`RefinementChat`** | `components/deepresearch/RefinementChat.tsx` | Chat sidebar for AI-powered content improvement |
 | **`ExecutionProgress`** | `components/deepresearch/ExecutionProgress.tsx` | Scrolling console output display |
 | **`FileUploadZone`** | `components/deepresearch/FileUploadZone.tsx` | Drag-and-drop upload with status indicators |
 
@@ -1004,7 +979,7 @@ This section provides an exhaustive trace of every class, function, database mod
 
 | Item | File | Purpose |
 |---|---|---|
-| **`useRfpTask()`** | `hooks/useRfpTask.ts` | Central state management — all state + 12 action functions |
+| **`useRfpTask()`** | `hooks/useRfpTask.ts` | Central state management — all state + action functions |
 | **`RfpTaskState`** | `types/rfp.ts` | TypeScript type for task state |
 | **`RfpWizardStep`** | `types/rfp.ts` | Union type: `0 \| 1 \| 2 \| ... \| 7` |
 | **`RFP_STEP_LABELS`** | `types/rfp.ts` | Human labels: Setup, Requirements, Tools & Tech, … |
@@ -1041,7 +1016,6 @@ This section provides an exhaustive trace of every class, function, database mod
 | `POST /{id}/stages/{N}/execute` | `execute_rfp_stage()` | Validate prior stages → mark running → `build_shared_state()` → `asyncio.create_task(_run_rfp_stage)` |
 | `GET /{id}/stages/{N}/content` | `get_rfp_stage_content()` | Return from `output_data["shared"]`, fallback to .md file |
 | `PUT /{id}/stages/{N}/content` | `update_rfp_stage_content()` | Save edits to DB `output_data["shared"]` + write .md file |
-| `POST /{id}/stages/{N}/refine` | `refine_rfp_content()` | LLM call with token capacity check, dynamic cap, content trimming if overflow, `timeout=300` |
 | `GET /{id}/stages/{N}/console` | `get_rfp_console()` | Return new console lines since `since` index |
 | `POST /{id}/reset-from/{N}` | `reset_from_stage()` | Reset stages ≥ N to pending; delete .md files |
 | `GET /{id}/download/{file}` | `download_rfp_artifact()` | Validate filename → FileResponse with attachment header |
@@ -1093,7 +1067,6 @@ This section provides an exhaustive trace of every class, function, database mod
 | `executeStage(N, id?)` | `POST .../execute` | Trigger phase execution; start WS + polling + console |
 | `fetchStageContent(N)` | `GET .../content` | Load output into `editableContent` state |
 | `saveStageContent(N, content, field)` | `PUT .../content` | Save edits to DB + disk |
-| `refineContent(N, message, content)` | `POST .../refine` | Send refinement instruction to LLM |
 | `uploadFile(file)` | `POST /api/files/upload` | Auto-create task if needed; upload file |
 | `loadTaskState(id)` | `GET /api/rfp/{id}` | Fetch full task state |
 | `resumeTask(id)` | `GET /api/rfp/{id}` | Load state + determine resume step + reconnect WS |
@@ -1149,7 +1122,7 @@ The RFP Proposal Generator uses a **custom phase-based** execution model:
 
 ### 11.5 LLM Call Sites
 
-There are **11 protected LLM call sites** in the RFP workflow (with `multi_agent=True`). Every call has dynamic `max_completion_tokens` capping and automatic prompt chunking with a 0.75 safety margin:
+There are **10 protected LLM call sites** in the RFP workflow (with `multi_agent=True`). Every call has dynamic `max_completion_tokens` capping and automatic prompt chunking with a 0.75 safety margin:
 
 | # | Call Site | Location | Purpose | Token Protection |
 |---|-----------|----------|---------|-----------------|
@@ -1159,11 +1132,10 @@ There are **11 protected LLM call sites** in the RFP workflow (with `multi_agent
 | 4 | **Specialist (chunked)** | `RfpPhaseBase._run_specialist()` | Specialist agent when content exceeds context | Per-chunk dynamic cap |
 | 5 | **Review (single)** | `RfpPhaseBase.execute()` | Reviewer agent 13-point checklist | `chunk_prompt_if_needed` + dynamic cap |
 | 6 | **Review (chunked)** | `RfpPhaseBase.execute()` | Reviewer when draft exceeds context | Per-chunk dynamic cap |
-| 7 | **Stage 7 generation** | `RfpProposalPhase._single_generate()` | Single/partial/accumulation calls | Dynamic cap via `get_model_limits` |
+| 7 | **Stage 7 generation** | `RfpProposalPhase._single_generate()` | Single/partial/accumulation calls | Dynamic cap via `get_effective_model_limits` |
 | 8 | **Stage 7 specialist** | `RfpProposalPhase.execute()` | Specialist validates compiled proposal | `_run_specialist()` (inherited) |
 | 9 | **Stage 7 review (single)** | `RfpProposalPhase.execute()` | Review compiled proposal | `chunk_prompt_if_needed` + dynamic cap |
 | 10 | **Stage 7 review (chunked)** | `RfpProposalPhase.execute()` | Chunked review of large proposal | Per-chunk dynamic cap |
-| 11 | **Refinement chat** | `refine_rfp_content()` in `rfp.py` | User-requested content improvement | Dynamic cap + content trimming |
 
 All LLM calls use: `temperature=0.7`, `max_completion_tokens=dynamically capped` (default ceiling: `16384`).
 Models are assigned per-stage by `PHASE_AGENT_MODELS` when `multi_agent=True` (see [Section 15.2](#152-model-assignments)).
@@ -1206,7 +1178,7 @@ Source: `cmbagent/phases/rfp/token_utils.py`, `cmbagent/phases/rfp/base.py`, `cm
 
 ### 12.1 Overview
 
-Every LLM call in the RFP pipeline is protected against context window overflow. There are **11 distinct LLM call sites** (with `multi_agent=True`), each with:
+Every LLM call in the RFP pipeline is protected against context window overflow. There are **10 distinct LLM call sites** (with `multi_agent=True`), each with:
 - **Dynamic `max_completion_tokens` capping** — prompt + output never exceeds context
 - **Automatic prompt chunking** — oversized prompts are split at `---` section boundaries
 - **0.75 safety margin** — tiktoken undercounts by 10–20% vs the API's actual tokenizer
@@ -1250,16 +1222,16 @@ If no `---` boundaries exist, the prompt is returned as a single-element list so
 | 2 | Generation (chunked) | `base.py` | Per-chunk dynamic cap |
 | 3 | Review (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic cap |
 | 4 | Review (chunked) | `base.py` | Per-chunk dynamic cap |
-| 5 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic cap via `get_model_limits` |
+| 5 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic cap via `get_effective_model_limits` |
 | 6 | Stage 7 review (single) | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
 | 7 | Stage 7 review (chunked) | `proposal_phase.py` | Per-chunk dynamic cap |
-| 8 | Refinement chat | `rfp.py` | Dynamic cap + content trimming (start+end) |
 
 ### 12.6 Key Functions (`token_utils.py`)
 
 | Function | Purpose |
 |----------|---------|
 | `get_model_limits(model)` | Returns `(max_context, max_output)` for a model |
+| `get_effective_model_limits(model)` | Azure-aware wrapper: returns `min(nominal, deployment)` limits when Azure uses a single deployment for all models |
 | `count_tokens(text, model)` | Count tokens using tiktoken (fallback: chars÷4) |
 | `count_messages_tokens(messages, model)` | Count tokens for a chat message list |
 | `chunk_prompt_if_needed(system, user, model, max_completion, safety_margin)` | Returns `None` (fits) or `List[str]` (chunks) |

@@ -147,7 +147,7 @@ class RfpPhaseBase(Phase):
         """Run generate pass (with auto-chunking if needed), then optional review pass(es)."""
         from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
         from cmbagent.phases.rfp.token_utils import (
-            get_model_limits,
+            get_effective_model_limits,
             count_tokens,
             chunk_prompt_if_needed,
         )
@@ -180,7 +180,7 @@ class RfpPhaseBase(Phase):
             user_prompt = self.build_user_prompt(context)
 
             # --- token capacity check ---
-            max_ctx, max_out = get_model_limits(model)
+            max_ctx, max_out = get_effective_model_limits(model)
             print(f"[{self.display_name}] Model {model}: context={max_ctx:,} tokens, max_output={max_out:,} tokens")
 
             chunks = chunk_prompt_if_needed(
@@ -423,7 +423,7 @@ class RfpPhaseBase(Phase):
         """
         from cmbagent.llm_provider import resolve_model_for_provider
         from cmbagent.phases.rfp.token_utils import (
-            get_model_limits, count_tokens, chunk_prompt_if_needed,
+            get_effective_model_limits, count_tokens, chunk_prompt_if_needed,
         )
         from cmbagent.phases.rfp.agent_teams import get_phase_models
 
@@ -436,7 +436,7 @@ class RfpPhaseBase(Phase):
         resolved_spec = resolve_model_for_provider(spec_model)
         _is_reasoning = any(spec_model.startswith(p) for p in ("o3", "o1"))
 
-        max_ctx, _ = get_model_limits(spec_model)
+        max_ctx, _ = get_effective_model_limits(spec_model)
         spec_user = f"Document to validate and improve:\n\n{content}"
 
         print(f"[{self.display_name}] Specialist agent ({spec_model}) validating content...")
