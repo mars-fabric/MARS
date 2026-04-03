@@ -285,8 +285,7 @@ async def execute_stage(task_id: str, stage_num: int, request: NewsPulseExecuteR
             if bg_key in _running_tasks and not _running_tasks[bg_key].done():
                 raise HTTPException(status_code=409, detail="Stage is already running")
 
-        # Allow re-running stages 2 and 3 (HITL loop back)
-        if stage.status == "completed" and stage_num not in (2, 3):
+        if stage.status == "completed":
             raise HTTPException(status_code=409, detail="Stage is already completed")
 
         # Check prerequisites

@@ -208,10 +208,16 @@ export function useNewsPulseTask(): UseNewsPulseTaskReturn {
     setError(null)
     setConsoleOutput([])
 
+    // Build config_overrides from stored taskConfig, filtered to relevant keys
+    const cfg = taskConfig
+    const config_overrides: Record<string, unknown> = Object.fromEntries(
+      Object.entries(cfg).filter(([, v]) => v !== undefined && v !== '')
+    )
+
     try {
       const resp = await apiFetch(`/api/newspulse/${id}/stages/${stageNum}/execute`, {
         method: 'POST',
-        body: JSON.stringify({}),
+        body: JSON.stringify({ config_overrides }),
       })
 
       // Stage 1 and 3 complete immediately
