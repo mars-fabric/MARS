@@ -672,14 +672,16 @@ async def _run_final_report_stage(
         NewsPulseReportPhaseConfig,
     )
     from cmbagent.phases.base import PhaseContext, PhaseStatus
+    from cmbagent.config.model_registry import get_model_registry
 
     db = _get_db()
     session_id = _get_session_id_for_task(task_id, db)
 
-    cfg = {**config_overrides}
+    stage_defaults = get_model_registry().get_stage_defaults("newspulse", 4)
+    cfg = {**stage_defaults, **config_overrides}
     phase_config = NewsPulseReportPhaseConfig(
         parent_run_id=task_id,
-        llm_model=cfg.pop("researcher_model", "gpt-4o"),
+        llm_model=cfg.pop("researcher_model", stage_defaults.get("researcher_model", "gpt-4o")),
         llm_temperature=float(cfg.pop("llm_temperature", 0.7)),
     )
     phase = NewsPulseReportPhase(phase_config)

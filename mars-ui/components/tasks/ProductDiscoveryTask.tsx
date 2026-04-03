@@ -20,6 +20,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ArrowLeft,
   ChevronRight,
+  ChevronLeft,
   RefreshCw,
   Copy,
   Check,
@@ -32,6 +33,12 @@ import {
   Edit3,
   CheckSquare,
   Square,
+  FileText,
+  LayoutGrid,
+  Maximize2,
+  Minimize2,
+  MessageSquare,
+  Printer,
 } from 'lucide-react'
 import { Button } from '@/components/core'
 import { usePdaTask } from '@/hooks/usePdaTask'
@@ -303,6 +310,695 @@ function ReviewPanel({
           {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Refine'}
         </Button>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// PromptsPanel — Stage 6: tabbed AI builder prompts
+// ---------------------------------------------------------------------------
+
+function PromptsPanel({
+  content,
+  onSave,
+  onRefine,
+}: {
+  content: string
+  onSave: (content: string) => Promise<void>
+  onRefine: (message: string, content: string) => Promise<string | null>
+}) {
+  // Parse ## sections from the markdown
+  const sections = React.useMemo(() => {
+    const parts = content.split(/\n(?=## )/)
+    return parts.map(part => {
+      const lines = part.split('\n')
+      const title = lines[0].replace(/^#+\s*/, '').trim()
+      const body = lines.slice(1).join('\n').trim()
+      return { title, body }
+    }).filter(s => s.title && s.body)
+  }, [content])
+
+  const tabs = sections.length > 0 ? sections : [{ title: 'Content', body: content }]
+  const [activeTab, setActiveTab] = useState(0)
+  const [editing, setEditing] = useState(false)
+  const [drafts, setDrafts] = useState<string[]>(() => tabs.map(t => t.body))
+  const [refineMsg, setRefineMsg] = useState('')
+  const [isRefining, setIsRefining] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => { setDrafts(tabs.map(t => t.body)) }, [content])
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(drafts[activeTab] || '')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    const rebuilt = tabs.map((t, i) => `## ${t.title}\n${drafts[i]}`).join('\n\n')
+    await onSave(rebuilt)
+    setIsSaving(false)
+    setEditing(false)
+  }
+
+  const handleRefine = async () => {
+    if (!refineMsg.trim()) return
+    setIsRefining(true)
+    const refined = await onRefine(refineMsg, drafts[activeTab] || '')
+    if (refined) setDrafts(prev => { const next = [...prev]; next[activeTab] = refined; return next })
+    setRefineMsg('')
+    setIsRefining(false)
+  }
+
+  const TAB_COLORS: Record<string, string> = {
+    'lovable': '#a855f7',
+    'bolt': '#f59e0b',
+    'google': '#3b82f6',
+    'general': '#22c55e',
+  }
+  const getTabColor = (title: string) => {
+    const key = title.toLowerCase()
+    if (key.includes('lovable')) return TAB_COLORS.lovable
+    if (key.includes('bolt') || key.includes('stack')) return TAB_COLORS.bolt
+    if (key.includes('google')) return TAB_COLORS.google
+    return TAB_COLORS.general
+  }
+
+  return (
+    <div className="flex flex-col gap-4 h-full">
+      {/* Tab bar */}
+      <div className="flex gap-2 flex-wrap">
+        {tabs.map((tab, i) => (
+          <button
+            key={i}
+            onClick={() => { setActiveTab(i); setEditing(false) }}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all"
+            style={{
+              borderColor: activeTab === i ? getTabColor(tab.title) : 'var(--mars-color-border)',
+              background: activeTab === i ? getTabColor(tab.title) + '18' : 'transparent',
+              color: activeTab === i ? getTabColor(tab.title) : 'var(--mars-color-text-secondary)',
+            }}
+          >
+            {tab.title.replace(/^(Lovable\.dev|Google AI Studio \/ Gemini|General Copilot \/ LLM|Bolt\.new \/ StackBlitz)\s*(Prompt)?/i, (_, g1) => g1 || tab.title)}
+          </button>
+        ))}
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border"
+            style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}
+          >
+            {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            onClick={() => setEditing(e => !e)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border"
+            style={{
+              borderColor: editing ? 'var(--mars-color-primary)' : 'var(--mars-color-border)',
+              color: editing ? 'var(--mars-color-primary)' : 'var(--mars-color-text-secondary)',
+            }}
+          >
+            <Edit3 className="w-3.5 h-3.5" />
+            {editing ? 'Preview' : 'Edit'}
+          </button>
+          {editing && (
+            <Button variant="primary" size="sm" onClick={handleSave} disabled={isSaving}>
+              {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Content */}
+      <div
+        className="flex-1 overflow-y-auto rounded-lg p-4"
+        style={{ background: 'var(--mars-color-surface)', border: '1px solid var(--mars-color-border)', minHeight: '300px' }}
+      >
+        {editing ? (
+          <textarea
+            value={drafts[activeTab] || ''}
+            onChange={e => setDrafts(prev => { const next = [...prev]; next[activeTab] = e.target.value; return next })}
+            className="w-full h-full min-h-[300px] bg-transparent font-mono text-sm outline-none resize-none"
+            style={{ color: 'var(--mars-color-text)' }}
+          />
+        ) : (
+          <div className="whitespace-pre-wrap text-sm" style={{ color: 'var(--mars-color-text)', fontFamily: 'monospace', lineHeight: '1.7' }}>
+            {drafts[activeTab] || ''}
+          </div>
+        )}
+      </div>
+
+      {/* AI Refine */}
+      <div className="flex gap-2 p-3 rounded-lg" style={{ background: 'var(--mars-color-surface-overlay, rgba(99,102,241,0.05))' }}>
+        <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--mars-color-primary)' }} />
+        <input
+          type="text"
+          placeholder="Ask AI to refine this prompt…"
+          value={refineMsg}
+          onChange={e => setRefineMsg(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && handleRefine()}
+          className="flex-1 bg-transparent text-sm outline-none"
+          style={{ color: 'var(--mars-color-text)' }}
+          disabled={isRefining}
+        />
+        <Button variant="primary" size="sm" onClick={handleRefine} disabled={isRefining || !refineMsg.trim()}>
+          {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Refine'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// SlidesPanel — Stage 7: slide viewer + PDF/Markdown export
+// ---------------------------------------------------------------------------
+
+interface ParsedSlide {
+  number: number
+  title: string
+  bullets: string[]
+  notes: string[]
+  rawBullets: string
+}
+
+function parseSlidesFromMarkdown(md: string): ParsedSlide[] {
+  if (!md) return []
+  // Split on lines starting with ## (slide boundary)
+  const chunks = md.split(/\n(?=## )/)
+  const slides: ParsedSlide[] = []
+  chunks.forEach((chunk, idx) => {
+    const lines = chunk.split('\n')
+    const titleLine = lines[0].replace(/^##\s*/, '').trim()
+    if (!titleLine) return
+    const bullets: string[] = []
+    const notes: string[] = []
+    lines.slice(1).forEach(line => {
+      const stripped = line.trim()
+      if (!stripped || stripped.startsWith('<!--')) return
+      if (stripped.startsWith('> ')) notes.push(stripped.slice(2))
+      else if (stripped.startsWith('>')) notes.push(stripped.slice(1).trim())
+      else if (stripped.startsWith('- ')) bullets.push(stripped.slice(2))
+      else if (stripped.startsWith('* ')) bullets.push(stripped.slice(2))
+      else if (/^\d+\.\s/.test(stripped)) bullets.push(stripped.replace(/^\d+\.\s/, ''))
+    })
+    slides.push({
+      number: idx + 1,
+      title: titleLine,
+      bullets,
+      notes,
+      rawBullets: bullets.join('\n'),
+    })
+  })
+  return slides
+}
+
+function exportSlidesToPDF(slides: ParsedSlide[], clientName: string) {
+  const escHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const boldify = (s: string) => escHtml(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+
+  const slidesHtml = slides.map(slide => `
+    <div class="slide">
+      <div class="slide-number">${slide.number} / ${slides.length}</div>
+      <h1>${escHtml(slide.title)}</h1>
+      <ul>
+        ${slide.bullets.map(b => `<li>${boldify(b)}</li>`).join('')}
+      </ul>
+      ${slide.notes.length > 0 ? `
+        <div class="notes">
+          <div class="notes-label">Speaker Notes</div>
+          ${slide.notes.map(n => `<div class="note">${boldify(n)}</div>`).join('')}
+        </div>` : ''}
+    </div>`).join('')
+
+  const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>${escHtml(clientName)} — Product Discovery Presentation</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; }
+  .slide {
+    width: 100%;
+    min-height: 100vh;
+    padding: 56px 72px;
+    page-break-after: always;
+    break-after: page;
+    display: flex;
+    flex-direction: column;
+    border-bottom: 2px solid #f0f0f0;
+    position: relative;
+  }
+  .slide:last-child { page-break-after: avoid; break-after: avoid; }
+  .slide-number {
+    position: absolute;
+    top: 24px;
+    right: 40px;
+    font-size: 11px;
+    color: #9ca3af;
+    font-weight: 500;
+  }
+  h1 {
+    font-size: 28px;
+    font-weight: 800;
+    color: #1e1b4b;
+    margin-bottom: 28px;
+    padding-bottom: 12px;
+    border-bottom: 3px solid #6366f1;
+    line-height: 1.3;
+  }
+  ul { list-style: none; flex: 1; }
+  li {
+    font-size: 15px;
+    color: #374151;
+    margin-bottom: 14px;
+    padding-left: 20px;
+    position: relative;
+    line-height: 1.6;
+  }
+  li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 9px;
+    width: 8px;
+    height: 8px;
+    background: #6366f1;
+    border-radius: 2px;
+  }
+  strong { color: #1e1b4b; font-weight: 700; }
+  .notes {
+    margin-top: 24px;
+    padding: 12px 16px;
+    background: #f8f7ff;
+    border-left: 3px solid #6366f1;
+    border-radius: 4px;
+  }
+  .notes-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #6366f1;
+    margin-bottom: 6px;
+  }
+  .note { font-size: 12px; color: #6b7280; line-height: 1.5; margin-bottom: 4px; }
+  @media print {
+    @page { size: A4 landscape; margin: 0; }
+    .slide { min-height: 100vh; page-break-after: always; }
+  }
+</style>
+</head>
+<body>
+${slidesHtml}
+<script>
+  window.onload = function() { window.print(); };
+</script>
+</body>
+</html>`
+
+  const blob = new Blob([html], { type: 'text/html' })
+  const url = URL.createObjectURL(blob)
+  const win = window.open(url, '_blank')
+  if (win) {
+    win.onafterprint = () => URL.revokeObjectURL(url)
+  }
+}
+
+function SlidesPanel({
+  content,
+  clientName,
+  onSave,
+  onRefine,
+}: {
+  content: string
+  clientName: string
+  onSave: (content: string) => Promise<void>
+  onRefine: (message: string, content: string) => Promise<string | null>
+}) {
+  const [draft, setDraft] = useState(content)
+  const [slideIndex, setSlideIndex] = useState(0)
+  const [showNotes, setShowNotes] = useState(true)
+  const [viewMode, setViewMode] = useState<'presentation' | 'grid' | 'edit'>('presentation')
+  const [refineMsg, setRefineMsg] = useState('')
+  const [isRefining, setIsRefining] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  useEffect(() => { setDraft(content); setSlideIndex(0) }, [content])
+
+  const slides = React.useMemo(() => parseSlidesFromMarkdown(draft), [draft])
+  const slide = slides[slideIndex]
+  const total = slides.length
+
+  const handleSave = async () => {
+    setIsSaving(true)
+    await onSave(draft)
+    setIsSaving(false)
+    setViewMode('presentation')
+  }
+
+  const handleRefine = async () => {
+    if (!refineMsg.trim()) return
+    setIsRefining(true)
+    const refined = await onRefine(refineMsg, draft)
+    if (refined) setDraft(refined)
+    setRefineMsg('')
+    setIsRefining(false)
+  }
+
+  const handleCopySlide = () => {
+    if (!slide) return
+    const text = `${slide.title}\n\n${slide.bullets.map(b => `• ${b}`).join('\n')}`
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const handleExportMd = () => {
+    const blob = new Blob([draft], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${clientName.replace(/\s+/g, '-').toLowerCase() || 'pda'}-slides.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // ── toolbar ──────────────────────────────────────────────────────────────
+  const toolbar = (
+    <div className="flex items-center justify-between flex-wrap gap-2 flex-shrink-0">
+      <div className="flex items-center gap-2">
+        {/* View mode switchers */}
+        {(['presentation', 'grid', 'edit'] as const).map(mode => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border"
+            style={{
+              borderColor: viewMode === mode ? 'var(--mars-color-primary)' : 'var(--mars-color-border)',
+              color: viewMode === mode ? 'var(--mars-color-primary)' : 'var(--mars-color-text-secondary)',
+              background: viewMode === mode ? 'rgba(99,102,241,0.07)' : 'transparent',
+            }}
+            title={mode === 'presentation' ? 'Slide view' : mode === 'grid' ? 'Grid view' : 'Edit mode'}
+          >
+            {mode === 'presentation' && <Maximize2 className="w-3.5 h-3.5" />}
+            {mode === 'grid' && <LayoutGrid className="w-3.5 h-3.5" />}
+            {mode === 'edit' && <Edit3 className="w-3.5 h-3.5" />}
+            <span className="capitalize">{mode}</span>
+          </button>
+        ))}
+        {viewMode === 'presentation' && (
+          <button
+            onClick={() => setShowNotes(n => !n)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border"
+            style={{
+              borderColor: showNotes ? 'var(--mars-color-primary)' : 'var(--mars-color-border)',
+              color: showNotes ? 'var(--mars-color-primary)' : 'var(--mars-color-text-secondary)',
+              background: showNotes ? 'rgba(99,102,241,0.07)' : 'transparent',
+            }}
+          >
+            <MessageSquare className="w-3.5 h-3.5" />
+            Notes
+          </button>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {viewMode === 'edit' && (
+          <Button variant="primary" size="sm" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Save'}
+          </Button>
+        )}
+        <button
+          onClick={handleCopySlide}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border"
+          style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}
+          title="Copy current slide"
+        >
+          {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+        </button>
+        <button
+          onClick={handleExportMd}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border"
+          style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text-secondary)' }}
+          title="Export as Markdown"
+        >
+          <FileText className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">MD</span>
+        </button>
+        <button
+          onClick={() => exportSlidesToPDF(slides, clientName)}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border"
+          style={{ borderColor: '#6366f1', color: '#6366f1', background: 'rgba(99,102,241,0.07)' }}
+          title="Export as PDF"
+        >
+          <Printer className="w-3.5 h-3.5" />
+          <span>PDF</span>
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── edit mode ─────────────────────────────────────────────────────────────
+  if (viewMode === 'edit') {
+    return (
+      <div className="flex flex-col gap-4 h-full">
+        {toolbar}
+        <textarea
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          className="flex-1 rounded-lg p-4 font-mono text-sm outline-none resize-none"
+          style={{
+            background: 'var(--mars-color-surface)',
+            border: '1px solid var(--mars-color-border)',
+            color: 'var(--mars-color-text)',
+            minHeight: '400px',
+          }}
+        />
+        <div className="flex gap-2 p-3 rounded-lg" style={{ background: 'var(--mars-color-surface-overlay, rgba(99,102,241,0.05))' }}>
+          <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--mars-color-primary)' }} />
+          <input
+            type="text"
+            placeholder="Ask AI to refine the slides content…"
+            value={refineMsg}
+            onChange={e => setRefineMsg(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleRefine()}
+            className="flex-1 bg-transparent text-sm outline-none"
+            style={{ color: 'var(--mars-color-text)' }}
+            disabled={isRefining}
+          />
+          <Button variant="primary" size="sm" onClick={handleRefine} disabled={isRefining || !refineMsg.trim()}>
+            {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Refine'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── grid mode ─────────────────────────────────────────────────────────────
+  if (viewMode === 'grid') {
+    return (
+      <div className="flex flex-col gap-4 h-full overflow-hidden">
+        {toolbar}
+        <p className="text-xs" style={{ color: 'var(--mars-color-text-secondary)' }}>
+          {total} slides — click a slide to jump to presentation view
+        </p>
+        <div className="flex-1 overflow-y-auto">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {slides.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => { setSlideIndex(i); setViewMode('presentation') }}
+                className="text-left rounded-xl border p-3 transition-all hover:shadow-md"
+                style={{
+                  borderColor: slideIndex === i ? 'var(--mars-color-primary)' : 'var(--mars-color-border)',
+                  background: slideIndex === i ? 'rgba(99,102,241,0.06)' : 'var(--mars-color-surface)',
+                }}
+              >
+                <div className="text-[10px] font-bold mb-1" style={{ color: 'var(--mars-color-primary)' }}>
+                  {s.number}
+                </div>
+                <div className="text-xs font-semibold mb-1.5 line-clamp-2" style={{ color: 'var(--mars-color-text)' }}>
+                  {s.title}
+                </div>
+                <ul className="space-y-0.5">
+                  {s.bullets.slice(0, 3).map((b, j) => (
+                    <li key={j} className="text-[10px] line-clamp-1" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                      • {b}
+                    </li>
+                  ))}
+                  {s.bullets.length > 3 && (
+                    <li className="text-[10px]" style={{ color: 'var(--mars-color-primary)' }}>
+                      +{s.bullets.length - 3} more
+                    </li>
+                  )}
+                </ul>
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* refine bar */}
+        <div className="flex gap-2 p-3 rounded-lg flex-shrink-0" style={{ background: 'var(--mars-color-surface-overlay, rgba(99,102,241,0.05))' }}>
+          <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--mars-color-primary)' }} />
+          <input
+            type="text"
+            placeholder="Ask AI to refine the deck…"
+            value={refineMsg}
+            onChange={e => setRefineMsg(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleRefine()}
+            className="flex-1 bg-transparent text-sm outline-none"
+            style={{ color: 'var(--mars-color-text)' }}
+            disabled={isRefining}
+          />
+          <Button variant="primary" size="sm" onClick={handleRefine} disabled={isRefining || !refineMsg.trim()}>
+            {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Refine'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── presentation mode ─────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col gap-3 h-full overflow-hidden">
+      {toolbar}
+
+      {/* Slide navigation strip */}
+      <div className="flex items-center gap-3 flex-shrink-0">
+        <button
+          onClick={() => setSlideIndex(i => Math.max(0, i - 1))}
+          disabled={slideIndex === 0}
+          className="p-1.5 rounded-lg border disabled:opacity-30"
+          style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text)' }}
+        >
+          <ChevronLeft className="w-4 h-4" />
+        </button>
+        <span className="text-sm font-medium" style={{ color: 'var(--mars-color-text)' }}>
+          {total > 0 ? `Slide ${slideIndex + 1} of ${total}` : 'No slides'}
+        </span>
+        <button
+          onClick={() => setSlideIndex(i => Math.min(total - 1, i + 1))}
+          disabled={slideIndex >= total - 1}
+          className="p-1.5 rounded-lg border disabled:opacity-30"
+          style={{ borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text)' }}
+        >
+          <ChevronRight className="w-4 h-4" />
+        </button>
+        {/* progress dots — max 10 shown */}
+        <div className="flex gap-1 overflow-hidden">
+          {slides.slice(0, 20).map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setSlideIndex(i)}
+              className="rounded-full transition-all flex-shrink-0"
+              style={{
+                width: i === slideIndex ? 20 : 6,
+                height: 6,
+                background: i === slideIndex ? 'var(--mars-color-primary)' : 'var(--mars-color-border)',
+              }}
+            />
+          ))}
+          {total > 20 && <span className="text-xs" style={{ color: 'var(--mars-color-text-secondary)' }}>…</span>}
+        </div>
+      </div>
+
+      {/* Slide card */}
+      {slide ? (
+        <div className="flex-1 overflow-y-auto flex flex-col gap-3 min-h-0">
+          <div
+            className="rounded-2xl p-6 flex-shrink-0"
+            style={{
+              background: 'var(--mars-color-surface)',
+              border: '1px solid var(--mars-color-border)',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+            }}
+          >
+            {/* Slide header */}
+            <div className="flex items-start justify-between mb-4 gap-3">
+              <h2 className="text-base font-bold leading-tight" style={{ color: 'var(--mars-color-text)' }}>
+                {slide.title}
+              </h2>
+              <span
+                className="text-xs px-2 py-0.5 rounded-full flex-shrink-0 font-semibold"
+                style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--mars-color-primary)' }}
+              >
+                {slide.number}/{total}
+              </span>
+            </div>
+            {/* Bullets */}
+            <ul className="space-y-2.5">
+              {slide.bullets.map((b, i) => (
+                <li key={i} className="flex items-start gap-2.5 text-sm" style={{ color: 'var(--mars-color-text)' }}>
+                  <span
+                    className="w-5 h-5 rounded flex items-center justify-center text-xs font-bold flex-shrink-0 mt-0.5"
+                    style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--mars-color-primary)' }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span
+                    dangerouslySetInnerHTML={{
+                      __html: b.replace(/\*\*(.+?)\*\*/g, '<strong style="color:var(--mars-color-text)">$1</strong>')
+                    }}
+                  />
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Speaker notes */}
+          {showNotes && slide.notes.length > 0 && (
+            <div
+              className="rounded-xl p-4 flex-shrink-0"
+              style={{
+                background: 'rgba(99,102,241,0.04)',
+                border: '1px solid rgba(99,102,241,0.2)',
+              }}
+            >
+              <div className="flex items-center gap-1.5 mb-2">
+                <MessageSquare className="w-3.5 h-3.5" style={{ color: 'var(--mars-color-primary)' }} />
+                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--mars-color-primary)' }}>
+                  Speaker Notes
+                </span>
+              </div>
+              <div className="space-y-1.5">
+                {slide.notes.map((n, i) => (
+                  <p key={i} className="text-xs leading-relaxed" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                    {n}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* refine bar */}
+          <div className="flex gap-2 p-3 rounded-lg flex-shrink-0" style={{ background: 'var(--mars-color-surface-overlay, rgba(99,102,241,0.05))' }}>
+            <Sparkles className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: 'var(--mars-color-primary)' }} />
+            <input
+              type="text"
+              placeholder="Ask AI to refine this slide or the whole deck…"
+              value={refineMsg}
+              onChange={e => setRefineMsg(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleRefine()}
+              className="flex-1 bg-transparent text-sm outline-none"
+              style={{ color: 'var(--mars-color-text)' }}
+              disabled={isRefining}
+            />
+            <Button variant="primary" size="sm" onClick={handleRefine} disabled={isRefining || !refineMsg.trim()}>
+              {isRefining ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Refine'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex-1 flex items-center justify-center">
+          <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+            No slides parsed yet — the content may still be generating.
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -1005,11 +1701,14 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               </p>
               {arch.benefits.length > 0 && (
                 <ul className="space-y-0.5">
-                  {arch.benefits.slice(0, 3).map((b, i) => (
-                    <li key={i} className="text-xs flex items-start gap-1.5" style={{ color: 'var(--mars-color-text-secondary)' }}>
-                      <span style={{ color: 'var(--mars-color-primary)' }}>✓</span> {b}
-                    </li>
-                  ))}
+                  {arch.benefits.slice(0, 3).map((b, i) => {
+                    const label = typeof b === 'string' ? b : (b as any).benefit || (b as any).description || JSON.stringify(b)
+                    return (
+                      <li key={i} className="text-xs flex items-start gap-1.5" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                        <span style={{ color: 'var(--mars-color-primary)' }}>✓</span> {label}
+                      </li>
+                    )
+                  })}
                 </ul>
               )}
             </div>
@@ -1105,7 +1804,34 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
       )
     }
 
-    // Stages 1, 2, 6, 7 — HITL review panel
+    // Stage 6 — AI Builder Prompts (custom tabbed view)
+    if (stageNum === 6 && status === 'completed' && content) {
+      return (
+        <div className="p-4 h-full overflow-hidden flex flex-col">
+          <PromptsPanel
+            content={content}
+            onSave={handleSaveContent}
+            onRefine={handleRefineContent}
+          />
+        </div>
+      )
+    }
+
+    // Stage 7 — Slide Content (presentation viewer + PDF export)
+    if (stageNum === 7 && status === 'completed' && content) {
+      return (
+        <div className="p-4 h-full overflow-hidden flex flex-col">
+          <SlidesPanel
+            content={content}
+            clientName={taskState?.client_name || intake.clientName || 'pda'}
+            onSave={handleSaveContent}
+            onRefine={handleRefineContent}
+          />
+        </div>
+      )
+    }
+
+    // Stages 1, 2 — HITL review panel
     if (status === 'completed' && content) {
       return (
         <div className="p-4 h-full">
@@ -1299,17 +2025,15 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               size="sm"
               onClick={() => {
                 const content = stageContents[7] ?? ''
-                const blob = new Blob([content], { type: 'text/markdown' })
-                const url = URL.createObjectURL(blob)
-                const a = document.createElement('a')
-                a.href = url
-                a.download = `pda-slides-${taskId?.slice(0, 8) ?? 'export'}.md`
-                a.click()
-                URL.revokeObjectURL(url)
+                if (!content) return
+                const slides = parseSlidesFromMarkdown(content)
+                if (slides.length > 0) {
+                  exportSlidesToPDF(slides, taskState?.client_name || '')
+                }
               }}
               disabled={!stageContents[7]}
             >
-              <Download className="w-4 h-4 mr-1.5" /> Export Slides
+              <Printer className="w-4 h-4 mr-1.5" /> Export PDF
             </Button>
           )}
         </div>

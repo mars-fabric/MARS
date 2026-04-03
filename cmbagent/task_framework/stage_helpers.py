@@ -22,38 +22,34 @@ from cmbagent.task_framework.utils import (
 logger = logging.getLogger(__name__)
 
 
-# ─── Default model assignments (from original phase configs) ─────────────
+# ─── Default model assignments — loaded from model_config.yaml via registry ──
 
-IDEA_DEFAULTS = {
-    "idea_maker_model": "gpt-4o",
-    "idea_hater_model": "o3-mini",
-    "planner_model": "gpt-4o",
-    "plan_reviewer_model": "o3-mini",
-    "orchestration_model": "gpt-4.1",
-    "formatter_model": "o3-mini",
-}
-
-METHOD_DEFAULTS = {
-    "researcher_model": "gpt-4.1",
-    "planner_model": "gpt-4.1",
-    "plan_reviewer_model": "o3-mini",
-    "orchestration_model": "gpt-4.1",
-    "formatter_model": "o3-mini",
-}
-
-EXPERIMENT_DEFAULTS = {
-    "engineer_model": "gpt-4.1",
-    "researcher_model": "o3-mini",
-    "planner_model": "gpt-4o",
-    "plan_reviewer_model": "o3-mini",
-    "orchestration_model": "gpt-4.1",
-    "formatter_model": "o3-mini",
+# Non-model execution defaults for the experiment stage (not model names)
+_EXPERIMENT_EXEC_DEFAULTS = {
     "involved_agents": ["engineer", "researcher"],
     "max_n_attempts": 10,
     "max_n_steps": 6,
     "restart_at_step": -1,
     "hardware_constraints": "",
 }
+
+
+def _get_idea_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return get_model_registry().get_stage_defaults("deepresearch", 1)
+
+
+def _get_method_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return get_model_registry().get_stage_defaults("deepresearch", 2)
+
+
+def _get_experiment_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return {
+        **_EXPERIMENT_EXEC_DEFAULTS,
+        **get_model_registry().get_stage_defaults("deepresearch", 3),
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -75,7 +71,7 @@ def build_idea_kwargs(
     """
     from cmbagent.task_framework.prompts.deepresearch.idea import idea_planner_prompt
 
-    cfg = {**IDEA_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_idea_defaults(), **(config_overrides or {})}
     idea_dir = create_work_dir(work_dir, "idea")
 
     return dict(
@@ -202,7 +198,7 @@ def build_method_kwargs(
         method_researcher_prompt,
     )
 
-    cfg = {**METHOD_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_method_defaults(), **(config_overrides or {})}
     method_dir = create_work_dir(work_dir, "method")
 
     return dict(
@@ -325,7 +321,7 @@ def build_experiment_kwargs(
         experiment_researcher_prompt,
     )
 
-    cfg = {**EXPERIMENT_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_experiment_defaults(), **(config_overrides or {})}
     involved_agents = cfg["involved_agents"]
     involved_agents_str = ", ".join(involved_agents)
     experiment_dir = create_work_dir(work_dir, "experiment")

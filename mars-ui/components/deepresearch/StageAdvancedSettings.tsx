@@ -2,18 +2,20 @@
 
 import React from 'react'
 import type { DeepresearchStageConfig } from '@/types/deepresearch'
-import { AVAILABLE_MODELS } from '@/types/deepresearch'
+import { useModelConfig, resolveStageDefault, type ModelOption } from '@/hooks/useModelConfig'
 
 function ModelSelect({
   label,
   value,
   defaultValue,
   onChange,
+  models,
 }: {
   label: string
   value: string | undefined
   defaultValue: string
   onChange: (v: string) => void
+  models: ModelOption[]
 }) {
   return (
     <div>
@@ -35,7 +37,7 @@ function ModelSelect({
         }}
       >
         <option value="">— use default ({defaultValue}) —</option>
-        {AVAILABLE_MODELS.map((m) => (
+        {models.map((m) => (
           <option key={m.value} value={m.value}>
             {m.label}
           </option>
@@ -53,36 +55,42 @@ interface StageAdvancedSettingsProps {
 
 /** Pure settings form — no toggle button. Parent controls visibility. */
 export default function StageAdvancedSettings({ stageNum, cfg, updateCfg }: StageAdvancedSettingsProps) {
+  const { availableModels, workflowDefaults } = useModelConfig()
+
+  // Helper: resolve the "(default: xxx)" label shown next to each field
+  const d = (stage: number | 'default', role: string, fallback: string) =>
+    resolveStageDefault(workflowDefaults, 'deepresearch', stage, role, fallback)
+
   return (
     <div className="space-y-4">
 
       {stageNum === 1 && (
         <>
-          <ModelSelect label="Idea Maker Model" value={cfg.idea_maker_model} defaultValue="gpt-4o" onChange={(v) => updateCfg({ idea_maker_model: v || undefined })} />
-          <ModelSelect label="Idea Critic Model" value={cfg.idea_hater_model} defaultValue="o3-mini" onChange={(v) => updateCfg({ idea_hater_model: v || undefined })} />
-          <ModelSelect label="Planner Model" value={cfg.planner_model} defaultValue="gpt-4o" onChange={(v) => updateCfg({ planner_model: v || undefined })} />
-          <ModelSelect label="Plan Reviewer Model" value={cfg.plan_reviewer_model} defaultValue="o3-mini" onChange={(v) => updateCfg({ plan_reviewer_model: v || undefined })} />
-          <ModelSelect label="Orchestration Model" value={cfg.orchestration_model} defaultValue="gpt-4.1" onChange={(v) => updateCfg({ orchestration_model: v || undefined })} />
-          <ModelSelect label="Formatter Model" value={cfg.formatter_model} defaultValue="o3-mini" onChange={(v) => updateCfg({ formatter_model: v || undefined })} />
+          <ModelSelect label="Idea Maker Model" value={cfg.idea_maker_model} defaultValue={d(1, 'idea_maker_model', 'gpt-4o')} onChange={(v) => updateCfg({ idea_maker_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Idea Critic Model" value={cfg.idea_hater_model} defaultValue={d(1, 'idea_hater_model', 'o3-mini')} onChange={(v) => updateCfg({ idea_hater_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Planner Model" value={cfg.planner_model} defaultValue={d(1, 'planner_model', 'gpt-4o')} onChange={(v) => updateCfg({ planner_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Plan Reviewer Model" value={cfg.plan_reviewer_model} defaultValue={d(1, 'plan_reviewer_model', 'o3-mini')} onChange={(v) => updateCfg({ plan_reviewer_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Orchestration Model" value={cfg.orchestration_model} defaultValue={d(1, 'orchestration_model', 'gpt-4.1')} onChange={(v) => updateCfg({ orchestration_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Formatter Model" value={cfg.formatter_model} defaultValue={d(1, 'formatter_model', 'o3-mini')} onChange={(v) => updateCfg({ formatter_model: v || undefined })} models={availableModels} />
         </>
       )}
 
       {stageNum === 2 && (
         <>
-          <ModelSelect label="Researcher Model" value={cfg.researcher_model} defaultValue="gpt-4.1" onChange={(v) => updateCfg({ researcher_model: v || undefined })} />
-          <ModelSelect label="Planner Model" value={cfg.planner_model} defaultValue="gpt-4.1" onChange={(v) => updateCfg({ planner_model: v || undefined })} />
-          <ModelSelect label="Plan Reviewer Model" value={cfg.plan_reviewer_model} defaultValue="o3-mini" onChange={(v) => updateCfg({ plan_reviewer_model: v || undefined })} />
-          <ModelSelect label="Orchestration Model" value={cfg.orchestration_model} defaultValue="gpt-4.1" onChange={(v) => updateCfg({ orchestration_model: v || undefined })} />
-          <ModelSelect label="Formatter Model" value={cfg.formatter_model} defaultValue="o3-mini" onChange={(v) => updateCfg({ formatter_model: v || undefined })} />
+          <ModelSelect label="Researcher Model" value={cfg.researcher_model} defaultValue={d(2, 'researcher_model', 'gpt-4.1')} onChange={(v) => updateCfg({ researcher_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Planner Model" value={cfg.planner_model} defaultValue={d(2, 'planner_model', 'gpt-4.1')} onChange={(v) => updateCfg({ planner_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Plan Reviewer Model" value={cfg.plan_reviewer_model} defaultValue={d(2, 'plan_reviewer_model', 'o3-mini')} onChange={(v) => updateCfg({ plan_reviewer_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Orchestration Model" value={cfg.orchestration_model} defaultValue={d(2, 'orchestration_model', 'gpt-4.1')} onChange={(v) => updateCfg({ orchestration_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Formatter Model" value={cfg.formatter_model} defaultValue={d(2, 'formatter_model', 'o3-mini')} onChange={(v) => updateCfg({ formatter_model: v || undefined })} models={availableModels} />
         </>
       )}
 
       {stageNum === 3 && (
         <>
-          <ModelSelect label="Engineer Model" value={cfg.engineer_model} defaultValue="gpt-4.1" onChange={(v) => updateCfg({ engineer_model: v || undefined })} />
-          <ModelSelect label="Researcher Model" value={cfg.researcher_model} defaultValue="o3-mini" onChange={(v) => updateCfg({ researcher_model: v || undefined })} />
-          <ModelSelect label="Planner Model" value={cfg.planner_model} defaultValue="gpt-4o" onChange={(v) => updateCfg({ planner_model: v || undefined })} />
-          <ModelSelect label="Orchestration Model" value={cfg.orchestration_model} defaultValue="gpt-4.1" onChange={(v) => updateCfg({ orchestration_model: v || undefined })} />
+          <ModelSelect label="Engineer Model" value={cfg.engineer_model} defaultValue={d(3, 'engineer_model', 'gpt-4.1')} onChange={(v) => updateCfg({ engineer_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Researcher Model" value={cfg.researcher_model} defaultValue={d(3, 'researcher_model', 'o3-mini')} onChange={(v) => updateCfg({ researcher_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Planner Model" value={cfg.planner_model} defaultValue={d(3, 'planner_model', 'gpt-4o')} onChange={(v) => updateCfg({ planner_model: v || undefined })} models={availableModels} />
+          <ModelSelect label="Orchestration Model" value={cfg.orchestration_model} defaultValue={d(3, 'orchestration_model', 'gpt-4.1')} onChange={(v) => updateCfg({ orchestration_model: v || undefined })} models={availableModels} />
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium mb-1" style={{ color: 'var(--mars-color-text-secondary)' }}>
@@ -116,7 +124,7 @@ export default function StageAdvancedSettings({ stageNum, cfg, updateCfg }: Stag
 
       {stageNum === 4 && (
         <>
-          <ModelSelect label="LLM Model" value={cfg.llm_model} defaultValue="gemini-2.5-flash" onChange={(v) => updateCfg({ llm_model: v || undefined })} />
+          <ModelSelect label="LLM Model" value={cfg.llm_model} defaultValue={d(4, 'llm_model', 'gemini-2.5-flash')} onChange={(v) => updateCfg({ llm_model: v || undefined })} models={availableModels} />
           <div>
             <label className="block text-xs font-medium mb-1" style={{ color: 'var(--mars-color-text-secondary)' }}>
               Writer Style <span className="font-normal opacity-60">(default: scientist)</span>

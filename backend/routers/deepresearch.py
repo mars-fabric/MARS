@@ -769,8 +769,10 @@ async def _run_paper_stage(
     """Run stage 4 (paper generation) using DeepresearchPaperPhase (LangGraph)."""
     from cmbagent.task_framework.phases.paper import DeepresearchPaperPhase, DeepresearchPaperPhaseConfig
     from cmbagent.phases.base import PhaseContext, PhaseStatus
+    from cmbagent.config.model_registry import get_model_registry
 
-    config_kwargs = {"parent_run_id": task_id, **config_overrides}
+    stage_defaults = get_model_registry().get_stage_defaults("deepresearch", 4)
+    config_kwargs = {"parent_run_id": task_id, **stage_defaults, **config_overrides}
     phase = DeepresearchPaperPhase(DeepresearchPaperPhaseConfig(**config_kwargs))
 
     context = PhaseContext(

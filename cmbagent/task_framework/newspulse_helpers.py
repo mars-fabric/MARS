@@ -20,31 +20,21 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-# ─── Default model assignments per stage ─────────────────────────────────
+# ─── Default model assignments — loaded from model_config.yaml via registry ──
 
-DISCOVERY_DEFAULTS = {
-    "researcher_model": "gpt-4.1",
-    "planner_model": "gpt-4o",
-    "plan_reviewer_model": "o3-mini",
-    "orchestration_model": "gpt-4.1",
-    "formatter_model": "o3-mini",
-}
+def _get_discovery_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return get_model_registry().get_stage_defaults("newspulse", 2)
 
-ANALYSIS_DEFAULTS = {
-    "researcher_model": "gpt-4.1",
-    "planner_model": "gpt-4.1",
-    "plan_reviewer_model": "o3-mini",
-    "orchestration_model": "gpt-4.1",
-    "formatter_model": "o3-mini",
-}
 
-FINAL_REPORT_DEFAULTS = {
-    "researcher_model": "gpt-4.1",
-    "planner_model": "gpt-4o",
-    "plan_reviewer_model": "o3-mini",
-    "orchestration_model": "gpt-4.1",
-    "formatter_model": "o3-mini",
-}
+def _get_analysis_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return get_model_registry().get_stage_defaults("newspulse", 3)
+
+
+def _get_final_report_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return get_model_registry().get_stage_defaults("newspulse", 4)
 
 
 TIME_WINDOW_LABELS = {
@@ -174,7 +164,7 @@ def build_discovery_kwargs(
     )
     from cmbagent.task_framework.utils import create_work_dir
 
-    cfg = {**DISCOVERY_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_discovery_defaults(), **(config_overrides or {})}
     discovery_dir = create_work_dir(work_dir, "discovery")
     time_window_human = TIME_WINDOW_LABELS.get(time_window, time_window)
     year_scope = _compute_year_scope(time_window)
@@ -318,7 +308,7 @@ def build_analysis_kwargs(
     )
     from cmbagent.task_framework.utils import create_work_dir
 
-    cfg = {**ANALYSIS_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_analysis_defaults(), **(config_overrides or {})}
     analysis_dir = create_work_dir(work_dir, "analysis")
     time_window_human = TIME_WINDOW_LABELS.get(time_window, time_window)
     year_scope = _compute_year_scope(time_window)
@@ -411,7 +401,7 @@ def build_final_report_kwargs(
     )
     from cmbagent.task_framework.utils import create_work_dir
 
-    cfg = {**FINAL_REPORT_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_final_report_defaults(), **(config_overrides or {})}
     final_dir = create_work_dir(work_dir, "final_report")
     time_window_human = TIME_WINDOW_LABELS.get(time_window, time_window)
     year_scope = _compute_year_scope(time_window)

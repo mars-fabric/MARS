@@ -20,15 +20,11 @@ from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# ─── Default model assignments for research stage (P&C mode) ────────────────
+# ─── Default model assignments — loaded from model_config.yaml via registry ──
 
-RESEARCH_DEFAULTS: Dict[str, str] = {
-    "researcher_model":     "gpt-4.1",
-    "planner_model":        "gpt-4o",
-    "plan_reviewer_model":  "o3-mini",
-    "orchestration_model":  "gpt-4.1",
-    "formatter_model":      "o3-mini",
-}
+def _get_research_defaults() -> dict:
+    from cmbagent.config.model_registry import get_model_registry
+    return get_model_registry().get_stage_defaults("pda", 1)
 
 # ---------------------------------------------------------------------------
 # Shared system prompt
@@ -50,6 +46,22 @@ ABSOLUTE RULES:
 5. All content must be consultant-quality: specific, actionable, evidence-backed.\
 """
 
+# Separate system prompt for stage 7 — Markdown slide content (NOT JSON)
+_SYSTEM_PRESENTER = """\
+You are a Principal Product Discovery Strategist at a Tier-1 strategy consulting firm \
+(equivalent to McKinsey, Bain, BCG, Deloitte). You are preparing an executive-quality \
+slide deck for a C-suite product discovery presentation.
+
+ABSOLUTE RULES:
+1. Use ONLY real, verifiable, publicly documented data referenced to actual sources.
+2. NEVER fabricate numbers, statistics, or citations.
+3. Return ONLY valid Markdown — use ## for slide titles, - for bullet points, \
+   > for speaker notes. Do NOT return JSON. Do NOT add markdown code fences.
+4. Every slide MUST have 7-8 substantive, specific, consultant-quality bullet points.
+5. Every slide MUST have speaker notes in > blockquote format.
+6. All content must be specific and actionable — no vague statements.\
+"""
+
 
 # ---------------------------------------------------------------------------
 # LLM call  (max_token-aware, with o-series fallback)
@@ -60,7 +72,9 @@ def _call_llm(prompt: str, system: str = None, max_tokens: int = 12000) -> str:
     from cmbagent.llm_provider import create_openai_client, resolve_model_for_provider
 
     client = create_openai_client()
-    model = resolve_model_for_provider(os.getenv("CMBAGENT_DEFAULT_MODEL", "gpt-4o"))
+    from cmbagent.config.model_registry import get_model_registry
+    _default_model = get_model_registry().get_stage_defaults("pda", 2).get("llm_model", "gpt-4o")
+    model = resolve_model_for_provider(os.getenv("CMBAGENT_DEFAULT_MODEL", _default_model))
 
     messages = []
     if system:
@@ -433,7 +447,7 @@ def build_research_pc_kwargs(
     import datetime
 
     intake = _get_intake(shared_state)
-    cfg = {**RESEARCH_DEFAULTS, **(config_overrides or {})}
+    cfg = {**_get_research_defaults(), **(config_overrides or {})}
     research_dir = create_work_dir(work_dir, "research_pc")
     year = str(datetime.datetime.now().year)
     fmt_kwargs = dict(year=year, **intake)
@@ -1092,7 +1106,7 @@ REQUIREMENTS:
 Include speaker notes under every slide using > blockquotes.
 Make every single bullet point specific, data-backed, and consultant-quality."""
 
-    raw = _call_llm(prompt, _SYSTEM_STRATEGIST, max_tokens=16000)
+    raw = _call_llm(prompt, _SYSTEM_PRESENTER, max_tokens=16000)
     content_str = raw.strip()
     return {"structured": {"slide_content": content_str}, "content_str": content_str}
 

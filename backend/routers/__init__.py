@@ -23,6 +23,7 @@ from routers.deepresearch import router as deepresearch_router
 from routers.newspulse import router as newspulse_router
 from routers.releasenotes import router as releasenotes_router
 from routers.rfp import router as rfp_router
+from routers.models import router as models_router
 
 
 def register_routers(app):
@@ -44,6 +45,7 @@ def register_routers(app):
     app.include_router(pda_router)  # Product Discovery Assistant
     app.include_router(newspulse_router)  # Industry News & Sentiment Pulse
     app.include_router(releasenotes_router)  # Release Notes Generator
+    app.include_router(models_router)  # Centralized model configuration
 
 
 __all__ = [
@@ -63,4 +65,5 @@ __all__ = [
     "pda_router",
     "deepresearch_router",
     "releasenotes_router",
+    "models_router",
 ]

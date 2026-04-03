@@ -1,0 +1,128 @@
+# =============================================================================
+# CMBAgent Model Configuration — Single Source of Truth
+# =============================================================================
+#
+# Edit this file to change model defaults across the ENTIRE system.
+# Changes take effect on backend restart (or call POST /api/models/reload).
+#
+# Environment variable overrides (applied on top of this file at runtime):
+#   CMBAGENT_DEFAULT_MODEL         — global default for all unspecified roles
+#   CMBAGENT_PLANNER_MODEL         — planner role
+#   CMBAGENT_PLAN_REVIEWER_MODEL   — plan reviewer role
+#   CMBAGENT_RESEARCHER_MODEL      — researcher role
+#   CMBAGENT_ENGINEER_MODEL        — engineer role
+#   CMBAGENT_ORCHESTRATION_MODEL   — orchestration / default_llm role
+#   CMBAGENT_FORMATTER_MODEL       — formatter role
+#   CMBAGENT_IDEA_MAKER_MODEL      — idea maker role
+#   CMBAGENT_IDEA_HATER_MODEL      — idea hater (critic) role
+# =============================================================================
+
+# ---------------------------------------------------------------------------
+# Available models shown in all UI dropdowns
+# Add / remove models here to instantly update every dropdown in the UI.
+# ---------------------------------------------------------------------------
+available_models:
+  - value: "gpt-4.1-2025-04-14"
+    label: "GPT-4.1"
+  - value: "gpt-4.1-mini"
+    label: "GPT-4.1 Mini"
+  - value: "gpt-4o"
+    label: "GPT-4o"
+  - value: "gpt-4o-mini-2024-07-18"
+    label: "GPT-4o Mini"
+  - value: "gpt-4.5-preview-2025-02-27"
+    label: "GPT-4.5 Preview"
+  - value: "gpt-5-2025-08-07"
+    label: "GPT-5"
+  - value: "o3-mini-2025-01-31"
+    label: "o3-mini"
+  - value: "gemini-2.5-pro"
+    label: "Gemini 2.5 Pro"
+  - value: "gemini-2.5-flash"
+    label: "Gemini 2.5 Flash"
+  - value: "gemini-2.0-flash"
+    label: "Gemini 2.0 Flash"
+  - value: "claude-sonnet-4-20250514"
+    label: "Claude Sonnet 4"
+  - value: "claude-3.5-sonnet-20241022"
+    label: "Claude 3.5 Sonnet"
+
+# ---------------------------------------------------------------------------
+# Global role defaults — used as fallback when no workflow-stage override exists.
+# These map directly to agent roles across all workflows.
+# ---------------------------------------------------------------------------
+global_defaults:
+  default_model: "gpt-4o"
+  planner_model: "gpt-4o"
+  plan_reviewer_model: "o3-mini"
+  researcher_model: "gpt-4.1-2025-04-14"
+  engineer_model: "gpt-4.1-2025-04-14"
+  orchestration_model: "gpt-4.1-2025-04-14"
+  formatter_model: "o3-mini"
+  idea_maker_model: "gpt-4o"
+  idea_hater_model: "o3-mini"
+
+# ---------------------------------------------------------------------------
+# Per-workflow, per-stage model defaults.
+# Stage numbers are string keys. "default" applies to all stages in the workflow.
+# Merge order (highest wins): user config_overrides > stage-specific > "default" > global_defaults
+# ---------------------------------------------------------------------------
+workflow_defaults:
+
+  deepresearch:
+    "1":  # Idea Generation
+      idea_maker_model: "gpt-4o"
+      idea_hater_model: "o3-mini"
+      planner_model: "gpt-4o"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+    "2":  # Method Development
+      researcher_model: "gpt-4.1-2025-04-14"
+      planner_model: "gpt-4.1-2025-04-14"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+    "3":  # Experiment / Code
+      engineer_model: "gpt-4.1-2025-04-14"
+      researcher_model: "o3-mini"
+      planner_model: "gpt-4o"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+    "4":  # Paper Generation
+      llm_model: "gemini-2.5-flash"
+
+  newspulse:
+    "2":  # News Discovery & Collection
+      researcher_model: "gpt-4.1-2025-04-14"
+      planner_model: "gpt-4o"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+    "3":  # Deep Sentiment & Analysis
+      researcher_model: "gpt-4.1-2025-04-14"
+      planner_model: "gpt-4.1-2025-04-14"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+    "4":  # Final Report + PDF
+      researcher_model: "gpt-4.1-2025-04-14"
+      planner_model: "gpt-4o"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+
+  pda:
+    "1":  # Research Summary (one_shot or planning_and_control)
+      researcher_model: "gpt-4.1-2025-04-14"
+      planner_model: "gpt-4o"
+      plan_reviewer_model: "o3-mini"
+      orchestration_model: "gpt-4.1-2025-04-14"
+      formatter_model: "o3-mini"
+    default:  # Stages 2-7 — direct LLM structured generation
+      llm_model: "gpt-4o"
+
+  rfp:
+    default:  # All stages use the same model
+      model: "gpt-4o"
