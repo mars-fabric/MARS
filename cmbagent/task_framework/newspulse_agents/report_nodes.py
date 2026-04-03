@@ -585,26 +585,41 @@ Output BOTH sections with their exact ### headings. No code fences.
 """
     result = _call_llm(state, prompt, max_tokens=2048)
 
-    # Split into trends and risks
-    parts = result.split("### Section B:")
-    trends = parts[0].replace("### Section A: Emerging Trends & Opportunities", "").strip()
-    risks = parts[1].strip() if len(parts) > 1 else ""
-    if not risks:
-        # Fallback: use full result for both
-        risks_marker = "Risk Factors"
-        idx = result.find(risks_marker)
-        if idx > 0:
-            trends = result[:idx].strip()
-            risks = result[idx:].strip()
+    # Split into trends and risks — robust regex split handles ##/###/####
+    # and optional bold/formatting around the "Section B" marker
+    import re as _re
+    split_pattern = _re.compile(
+        r'^\s*#{1,4}\s*(?:\*{2})?Section\s*B[:\s]*(?:\*{2})?.*$',
+        _re.MULTILINE | _re.IGNORECASE,
+    )
+    split_match = split_pattern.search(result)
+    if split_match:
+        trends = result[:split_match.start()].strip()
+        risks = result[split_match.end():].strip()
+    else:
+        # Fallback: look for "Risk Factors" anywhere
+        risk_pattern = _re.compile(
+            r'^\s*#{0,4}\s*(?:\*{2})?\s*Risk\s*Factors.*$',
+            _re.MULTILINE | _re.IGNORECASE,
+        )
+        risk_match = risk_pattern.search(result)
+        if risk_match:
+            trends = result[:risk_match.start()].strip()
+            risks = result[risk_match.end():].strip()
         else:
+            # Last resort: put full result in trends
+            logger.warning("trends_risks_node: could not split sections, using full result for trends")
             trends = result
             risks = ""
 
     # Clean up any residual duplicate headings the LLM may have echoed
     trends = _strip_heading(trends, "Emerging Trends & Opportunities")
     trends = _strip_heading(trends, "Emerging Trends")
+    trends = _strip_heading(trends, "Section A")
     risks = _strip_heading(risks, "Risk Factors & Challenges")
     risks = _strip_heading(risks, "Risk Factors")
+    # Also strip any leftover "Section A:" heading from trends
+    trends = _re.sub(r'^\s*#{1,4}\s*Section\s*A[:\s].*\n*', '', trends, flags=_re.IGNORECASE).strip()
 
     logger.info("trends_risks_node: trends=%d chars, risks=%d chars", len(trends), len(risks))
     return {
@@ -658,25 +673,39 @@ Output BOTH sections with their exact ### headings. No code fences.
 """
     result = _call_llm(state, prompt, max_tokens=2048)
 
-    # Split
-    parts = result.split("### Section B:")
-    regional = parts[0].replace(f"### Section A: Regional Market Dynamics ({region})", "").strip()
-    outlook = parts[1].strip() if len(parts) > 1 else ""
-    if not outlook:
-        marker = "Outlook"
-        idx = result.find(marker)
-        if idx > 0:
-            regional = result[:idx].strip()
-            outlook = result[idx:].strip()
+    # Split — robust regex handles ##/###/#### and formatting variants
+    import re as _re
+    split_pattern = _re.compile(
+        r'^\s*#{1,4}\s*(?:\*{2})?Section\s*B[:\s]*(?:\*{2})?.*$',
+        _re.MULTILINE | _re.IGNORECASE,
+    )
+    split_match = split_pattern.search(result)
+    if split_match:
+        regional = result[:split_match.start()].strip()
+        outlook = result[split_match.end():].strip()
+    else:
+        # Fallback: look for "Outlook" heading anywhere
+        outlook_pattern = _re.compile(
+            r'^\s*#{0,4}\s*(?:\*{2})?\s*Outlook.*$',
+            _re.MULTILINE | _re.IGNORECASE,
+        )
+        outlook_match = outlook_pattern.search(result)
+        if outlook_match:
+            regional = result[:outlook_match.start()].strip()
+            outlook = result[outlook_match.end():].strip()
         else:
+            logger.warning("regional_outlook_node: could not split sections, using full result for regional")
             regional = result
             outlook = ""
 
-    # Clean up any residual duplicate headings the LLM may have echoed
+    # Clean up residual duplicate headings
     regional = _strip_heading(regional, f"Regional Market Dynamics ({region})")
     regional = _strip_heading(regional, "Regional Market Dynamics")
+    regional = _strip_heading(regional, "Section A")
     outlook = _strip_heading(outlook, "Outlook & Recommendations")
     outlook = _strip_heading(outlook, "Outlook")
+    # Strip leftover "Section A:" heading from regional
+    regional = _re.sub(r'^\s*#{1,4}\s*Section\s*A[:\s].*\n*', '', regional, flags=_re.IGNORECASE).strip()
 
     logger.info("regional_outlook_node: regional=%d chars, outlook=%d chars", len(regional), len(outlook))
     return {
@@ -754,16 +783,18 @@ def assemble_node(state: Dict[str, Any]) -> Dict[str, Any]:
         companies_line = f"\n> **Companies:** {companies}\n"
 
     # Clean up section content — strip any leading duplicate headings
-    exec_summary = _strip_heading(state.get('executive_summary', '*No data available.*'), 'Executive Summary')
-    sentiment = _strip_heading(state.get('sentiment_dashboard', '*No data available.*'), 'Market Sentiment Dashboard')
-    headlines = _strip_heading(state.get('headlines', '*No data available.*'), 'Top Headlines')
-    in_depth = _strip_heading(state.get('in_depth_analysis', '*No data available.*'), 'In-Depth Analysis')
-    company = _strip_heading(state.get('company_analysis', '*No data available.*'), 'Company Analysis')
-    trends = _strip_heading(state.get('trends_opportunities', '*No data available.*'), 'Emerging Trends')
-    risks = _strip_heading(state.get('risks_challenges', '*No data available.*'), 'Risk Factors')
-    regional = _strip_heading(state.get('regional_dynamics', '*No data available.*'), 'Regional Market Dynamics')
-    outlook = _strip_heading(state.get('outlook_recommendations', '*No data available.*'), 'Outlook')
-    sources = state.get('sources_references', '*No sources available.*')
+    # Use `or` to catch both missing keys AND empty strings
+    _fallback = '*No data available.*'
+    exec_summary = _strip_heading(state.get('executive_summary') or _fallback, 'Executive Summary')
+    sentiment = _strip_heading(state.get('sentiment_dashboard') or _fallback, 'Market Sentiment Dashboard')
+    headlines = _strip_heading(state.get('headlines') or _fallback, 'Top Headlines')
+    in_depth = _strip_heading(state.get('in_depth_analysis') or _fallback, 'In-Depth Analysis')
+    company = _strip_heading(state.get('company_analysis') or _fallback, 'Company Analysis')
+    trends = _strip_heading(state.get('trends_opportunities') or _fallback, 'Emerging Trends')
+    risks = _strip_heading(state.get('risks_challenges') or _fallback, 'Risk Factors')
+    regional = _strip_heading(state.get('regional_dynamics') or _fallback, 'Regional Market Dynamics')
+    outlook = _strip_heading(state.get('outlook_recommendations') or _fallback, 'Outlook')
+    sources = state.get('sources_references') or '*No sources available.*'
 
     report = f"""# {industry} — Industry News & Sentiment Pulse
 

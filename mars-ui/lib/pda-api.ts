@@ -11,21 +11,13 @@ import type {
   SolutionArchetype,
   Feature,
 } from '@/types/pda'
-
-// ---------------------------------------------------------------------------
-// Direct backend URL — bypasses Next.js proxy (which has ~30s timeout).
-// Backend has CORS "*" so browser can call it directly, same as test scripts.
-// ---------------------------------------------------------------------------
-function getBackendUrl(endpoint: string): string {
-  const base = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000').replace(/\/$/, '')
-  return `${base}${endpoint}`
-}
+import { getApiUrl } from '@/lib/config'
 
 async function callPDA<T = any>(
   endpoint: string,
   body: Record<string, any>,
 ): Promise<T> {
-  const url = getBackendUrl(`/api/pda${endpoint}`)
+  const url = getApiUrl(`/api/pda${endpoint}`)
   console.log(`[PDA] POST ${url}`, body)
 
   const response = await fetch(url, {
