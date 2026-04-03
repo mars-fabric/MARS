@@ -274,6 +274,79 @@ async def newspulse_websocket_endpoint(websocket: WebSocket, task_id: str, stage
         pass
 
 
+# WebSocket endpoint for PDA stage execution
+@app.websocket("/ws/pda/{task_id}/{stage_num}")
+async def pda_websocket_endpoint(websocket: WebSocket, task_id: str, stage_num: int):
+    """WebSocket endpoint for streaming PDA stage execution output."""
+    import asyncio
+    from routers.pda import _get_console_lines, _clear_console_buffer
+
+    await websocket.accept()
+
+    buf_key = f"pda:{task_id}:{stage_num}"
+    line_index = 0
+
+    try:
+        await send_ws_event(websocket, "status", {
+            "message": f"Connected to PDA stage {stage_num}",
+            "stage_num": stage_num,
+        }, run_id=task_id)
+
+        while True:
+            await asyncio.sleep(1)
+
+            new_lines = _get_console_lines(buf_key, since_index=line_index)
+            for line in new_lines:
+                await send_ws_event(websocket, "console_output", {
+                    "text": line,
+                    "stage_num": stage_num,
+                }, run_id=task_id)
+            line_index += len(new_lines)
+
+            try:
+                from cmbagent.database.base import get_db_session
+                db = get_db_session()
+                try:
+                    from routers.pda import _get_session_id_for_task, _get_stage_repo
+                    session_id = _get_session_id_for_task(task_id, db)
+                    repo = _get_stage_repo(db, session_id=session_id)
+                    stages = repo.list_stages(parent_run_id=task_id)
+                    stage = next((s for s in stages if s.stage_number == stage_num), None)
+                    if stage:
+                        if stage.status == "completed":
+                            remaining = _get_console_lines(buf_key, since_index=line_index)
+                            for line in remaining:
+                                await send_ws_event(websocket, "console_output", {
+                                    "text": line,
+                                    "stage_num": stage_num,
+                                }, run_id=task_id)
+                            await send_ws_event(websocket, "stage_completed", {
+                                "stage_num": stage_num,
+                                "stage_name": stage.stage_name,
+                            }, run_id=task_id)
+                            _clear_console_buffer(buf_key)
+                            break
+                        elif stage.status == "failed":
+                            remaining = _get_console_lines(buf_key, since_index=line_index)
+                            for line in remaining:
+                                await send_ws_event(websocket, "console_output", {
+                                    "text": line,
+                                    "stage_num": stage_num,
+                                }, run_id=task_id)
+                            await send_ws_event(websocket, "stage_failed", {
+                                "stage_num": stage_num,
+                                "error": stage.error_message or "Stage failed",
+                            }, run_id=task_id)
+                            _clear_console_buffer(buf_key)
+                            break
+                finally:
+                    db.close()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 # For backward compatibility - expose some common utilities
 def resolve_run_id(run_id: str) -> str:
     """Resolve task_id to database run_id if available."""

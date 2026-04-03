@@ -1,10 +1,12 @@
 'use client'
 
 import React, { useState, useCallback } from 'react'
-import { ArrowRight, Loader2, Sparkles } from 'lucide-react'
+import { ArrowRight, Loader2, Settings2, Sparkles } from 'lucide-react'
 import { Button } from '@/components/core'
 import { TIME_WINDOW_OPTIONS, SETUP_SUGGESTIONS } from '@/types/newspulse'
 import type { useNewsPulseTask } from '@/hooks/useNewsPulseTask'
+import type { NewsPulseStageConfig } from '@/types/newspulse'
+import NpStageAdvancedSettings from './NpStageAdvancedSettings'
 
 const REGION_OPTIONS = [
   'Global',
@@ -25,7 +27,7 @@ interface NpSetupPanelProps {
 }
 
 export default function NpSetupPanel({ hook, onNext }: NpSetupPanelProps) {
-  const { createTask, isLoading, error } = hook
+  const { createTask, isLoading, error, taskConfig, setTaskConfig } = hook
 
   const [formData, setFormData] = useState({
     industry: '',
@@ -33,6 +35,11 @@ export default function NpSetupPanel({ hook, onNext }: NpSetupPanelProps) {
     region: 'Global',
     time_window: '2026',
   })
+  const [showSettings, setShowSettings] = useState(false)
+
+  const updateCfg = useCallback((patch: Partial<NewsPulseStageConfig>) => {
+    setTaskConfig({ ...taskConfig, ...patch })
+  }, [taskConfig, setTaskConfig])
 
   const handleInputChange = useCallback(
     (field: keyof typeof formData, value: string) => {
@@ -242,23 +249,58 @@ export default function NpSetupPanel({ hook, onNext }: NpSetupPanelProps) {
         )}
 
         {/* Submit Button */}
-        <Button
-          onClick={handleSubmit}
-          disabled={isLoading || !formData.industry.trim()}
-          className="w-full"
-        >
-          {isLoading ? (
-            <>
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-              Creating Task...
-            </>
-          ) : (
-            <>
-              Continue to News Discovery
-              <ArrowRight className="w-4 h-4 ml-2" />
-            </>
+        <div className="space-y-3">
+          {/* News Discovery settings row */}
+          <div className="flex items-center justify-between">
+            <span
+              className="text-xs font-medium"
+              style={{ color: 'var(--mars-color-text-secondary)' }}
+            >
+              News Discovery settings
+            </span>
+            <button
+              onClick={() => setShowSettings(s => !s)}
+              title="Advanced model settings for News Discovery"
+              className="p-1.5 rounded-mars-sm transition-colors"
+              style={{
+                color: showSettings ? 'var(--mars-color-accent)' : 'var(--mars-color-text-secondary)',
+                backgroundColor: showSettings ? 'var(--mars-color-accent-subtle, rgba(99,102,241,0.1))' : 'transparent',
+              }}
+            >
+              <Settings2 className="w-4 h-4" />
+            </button>
+          </div>
+
+          {showSettings && (
+            <div
+              className="p-4 rounded-mars-md border"
+              style={{
+                backgroundColor: 'var(--mars-color-surface-overlay)',
+                borderColor: 'var(--mars-color-border)',
+              }}
+            >
+              <NpStageAdvancedSettings stageNum={2} cfg={taskConfig} updateCfg={updateCfg} />
+            </div>
           )}
-        </Button>
+
+          <Button
+            onClick={handleSubmit}
+            disabled={isLoading || !formData.industry.trim()}
+            className="w-full"
+          >
+            {isLoading ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Creating Task...
+              </>
+            ) : (
+              <>
+                Continue to News Discovery
+                <ArrowRight className="w-4 h-4 ml-2" />
+              </>
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   )
