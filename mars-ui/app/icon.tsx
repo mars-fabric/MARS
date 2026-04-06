@@ -1,29 +1,12 @@
-import { ImageResponse } from 'next/og'
-
 export const size = { width: 32, height: 32 }
-export const contentType = 'image/png'
+export const contentType = 'image/svg+xml'
 
 export default function Icon() {
-  return new ImageResponse(
-    (
-      <div
-        style={{
-          fontSize: 20,
-          background: '#3B82F6',
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'white',
-          borderRadius: '6px',
-          fontWeight: 700,
-          fontFamily: 'system-ui',
-        }}
-      >
-        M
-      </div>
-    ),
-    { ...size }
-  )
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+    <rect width="32" height="32" rx="6" fill="#3B82F6"/>
+    <text x="16" y="22" font-family="system-ui,sans-serif" font-size="18" font-weight="700" fill="white" text-anchor="middle">M</text>
+  </svg>`
+  return new Response(svg, {
+    headers: { 'Content-Type': 'image/svg+xml' },
+  })
 }

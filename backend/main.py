@@ -292,6 +292,40 @@ async def pda_websocket_endpoint(websocket: WebSocket, task_id: str, stage_num: 
             "stage_num": stage_num,
         }, run_id=task_id)
 
+        # Check immediately if the stage is already completed (handles reconnect/resume)
+        try:
+            from cmbagent.database.base import get_db_session
+            _db_init = get_db_session()
+            try:
+                from routers.pda import _get_session_id_for_task, _get_stage_repo
+                _sid_init = _get_session_id_for_task(task_id, _db_init)
+                _repo_init = _get_stage_repo(_db_init, session_id=_sid_init)
+                _stages_init = _repo_init.list_stages(parent_run_id=task_id)
+                _stage_init = next((s for s in _stages_init if s.stage_number == stage_num), None)
+                if _stage_init and _stage_init.status == "completed":
+                    # Flush any remaining console lines then signal completion immediately
+                    remaining = _get_console_lines(buf_key, since_index=line_index)
+                    for line in remaining:
+                        await send_ws_event(websocket, "console_output", {
+                            "text": line, "stage_num": stage_num,
+                        }, run_id=task_id)
+                    await send_ws_event(websocket, "stage_completed", {
+                        "stage_num": stage_num,
+                        "stage_name": _stage_init.stage_name,
+                    }, run_id=task_id)
+                    _clear_console_buffer(buf_key)
+                    return
+                elif _stage_init and _stage_init.status == "failed":
+                    await send_ws_event(websocket, "stage_failed", {
+                        "stage_num": stage_num,
+                        "error": _stage_init.error_message or "Stage failed",
+                    }, run_id=task_id)
+                    return
+            finally:
+                _db_init.close()
+        except Exception:
+            pass
+
         while True:
             await asyncio.sleep(1)
 

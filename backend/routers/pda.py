@@ -691,8 +691,15 @@ async def _run_structured_stage(
         _run_stage_with_capture, buf_key, stage_num, shared_state, work_dir, helpers,
     )
 
+    # Resolve session_id up-front so _persist_stage_result doesn't need an extra DB query
+    _db = _get_db()
+    try:
+        _sid = _get_session_id_for_task(task_id, _db)
+    finally:
+        _db.close()
+
     await _persist_stage_result(task_id, stage_num, sdef, buf_key, work_dir, result_data,
-                                 session_id=None)
+                                 session_id=_sid)
 
 
 async def _persist_stage_result(

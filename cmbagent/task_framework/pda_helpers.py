@@ -146,6 +146,74 @@ def _extract_json_array(text: str) -> Optional[list]:
     return None
 
 
+def _repair_json_array(text: str) -> Optional[list]:
+    """
+    Recover items from a truncated or malformed JSON array.
+
+    Strategy: walk the raw text character by character, extract every
+    syntactically complete top-level ``{...}`` object, and return the list
+    of successfully-parsed objects.  This handles responses that are cut off
+    mid-array because the LLM hit its token budget.
+    """
+    # Strip fences
+    text = re.sub(r"^```(?:json)?\s*\n?", "", text.strip())
+    text = re.sub(r"\n?```\s*$", "", text).strip()
+
+    # Find the opening bracket
+    start = text.find("[")
+    if start == -1:
+        return None
+    body = text[start + 1:]  # everything after the opening `[`
+
+    items: list = []
+    depth = 0
+    in_string = False
+    escape_next = False
+    obj_start: Optional[int] = None
+
+    for i, c in enumerate(body):
+        if escape_next:
+            escape_next = False
+            continue
+        if c == "\\" and in_string:
+            escape_next = True
+            continue
+        if c == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+
+        if c == "{":
+            if depth == 0:
+                obj_start = i  # beginning of a top-level object
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0 and obj_start is not None:
+                # We have a syntactically complete object — try to parse it
+                candidate = body[obj_start: i + 1]
+                try:
+                    obj = json.loads(candidate)
+                    if isinstance(obj, dict):
+                        items.append(obj)
+                except json.JSONDecodeError:
+                    pass
+                obj_start = None
+        elif c == "]" and depth == 0:
+            break  # reached the proper end of the array
+
+    return items if items else None
+
+
+def _extract_json_array_robust(text: str) -> Optional[list]:
+    """Try standard extraction first; fall back to truncation repair."""
+    result = _extract_json_array(text)
+    if result is not None:
+        return result
+    return _repair_json_array(text)
+
+
 # ---------------------------------------------------------------------------
 # Intake helper
 # ---------------------------------------------------------------------------
@@ -738,9 +806,19 @@ Return ONLY a valid JSON ARRAY:
   }}
 ]"""
 
-    raw = _call_llm(prompt, _SYSTEM_STRATEGIST, max_tokens=14000)
-    parsed = _extract_json_array(raw) or []
-    return {"structured": parsed, "content_str": _opportunities_to_md(parsed)}
+    raw = _call_llm(prompt, _SYSTEM_STRATEGIST, max_tokens=16000)
+    parsed = _extract_json_array_robust(raw)
+    if parsed:
+        content_str = _opportunities_to_md(parsed)
+    else:
+        print("[PDA] Stage 3: JSON parse FAILED — storing raw LLM response as fallback")
+        parsed = []
+        content_str = (
+            "# Opportunity Areas\n\n"
+            "> ⚠️ Could not parse structured opportunities. Raw output below. Re-run to try again.\n\n"
+            "---\n\n" + raw
+        )
+    return {"structured": parsed, "content_str": content_str}
 
 
 # ---------------------------------------------------------------------------
@@ -749,14 +827,16 @@ Return ONLY a valid JSON ARRAY:
 
 def _stage_solution_archetypes(ss: dict, work_dir: str) -> dict:
     intake = _get_intake(ss)
-    selected_opp = ss.get("selected_opportunity", {})
+    selected_opp = ss.get("selected_opportunity") or {}
     if isinstance(selected_opp, str):
         try:
             selected_opp = json.loads(selected_opp)
         except (json.JSONDecodeError, TypeError):
             selected_opp = {"title": selected_opp}
+    if not isinstance(selected_opp, dict):
+        selected_opp = {}
     opp_str = json.dumps(selected_opp, indent=2)[:3000]
-    problem = ss.get("problem_definition", {})
+    problem = ss.get("problem_definition") or {}
     personas = problem.get("personasAffected", []) if isinstance(problem, dict) else []
     personas_str = json.dumps(personas[:3], indent=2) if personas else "[]"
     print("[PDA] Stage 4: Solution Archetypes...")
@@ -829,9 +909,27 @@ Return ONLY a valid JSON ARRAY:
   }}
 ]"""
 
-    raw = _call_llm(prompt, _SYSTEM_STRATEGIST, max_tokens=14000)
-    parsed = _extract_json_array(raw) or []
-    return {"structured": parsed, "content_str": _archetypes_to_md(parsed)}
+    # Stage 4 generates large nested JSON — use 16384 (gpt-4o max output)
+    raw = _call_llm(prompt, _SYSTEM_STRATEGIST, max_tokens=16000)
+    parsed = _extract_json_array_robust(raw)
+
+    if parsed:
+        print(f"[PDA] Stage 4: parsed {len(parsed)} archetypes")
+        content_str = _archetypes_to_md(parsed)
+    else:
+        # JSON parsing failed (likely truncation) — store the raw LLM text so
+        # the user can at least see the generated content in the UI review panel
+        print("[PDA] Stage 4: JSON parse FAILED — storing raw LLM response as fallback")
+        parsed = []
+        content_str = (
+            "# Solution Archetypes\n\n"
+            "> ⚠️ The AI response could not be parsed as structured data. "
+            "The raw output is shown below. You can **re-run the stage** to try again, "
+            "or review the content below and proceed manually.\n\n"
+            "---\n\n" + raw
+        )
+
+    return {"structured": parsed, "content_str": content_str}
 
 
 # ---------------------------------------------------------------------------
@@ -840,8 +938,8 @@ Return ONLY a valid JSON ARRAY:
 
 def _stage_features(ss: dict, work_dir: str) -> dict:
     intake = _get_intake(ss)
-    selected_arch = ss.get("selected_archetype", {})
-    selected_opp = ss.get("selected_opportunity", {})
+    selected_arch = ss.get("selected_archetype") or {}
+    selected_opp = ss.get("selected_opportunity") or {}
 
     for var, val in [("arch", selected_arch), ("opp", selected_opp)]:
         if isinstance(val, str):
@@ -849,12 +947,14 @@ def _stage_features(ss: dict, work_dir: str) -> dict:
                 val = json.loads(val)
             except (json.JSONDecodeError, TypeError):
                 val = {"title": val}
+        if not isinstance(val, dict):
+            val = {}
         if var == "arch":
             selected_arch = val
         else:
             selected_opp = val
 
-    problem = ss.get("problem_definition", {})
+    problem = ss.get("problem_definition") or {}
     kpis = problem.get("kpisImpacted", []) if isinstance(problem, dict) else []
     kpis_str = json.dumps(kpis[:5], indent=2) if kpis else "[]"
     expected = ", ".join(intake.get("expected_output", []))
@@ -943,8 +1043,19 @@ Return ONLY a valid JSON ARRAY:
 ]"""
 
     raw = _call_llm(prompt, _SYSTEM_STRATEGIST, max_tokens=16000)
-    parsed = _extract_json_array(raw) or []
-    return {"structured": parsed, "content_str": _features_to_md(parsed)}
+    parsed = _extract_json_array_robust(raw)
+    if parsed:
+        print(f"[PDA] Stage 5: parsed {len(parsed)} features")
+        content_str = _features_to_md(parsed)
+    else:
+        print("[PDA] Stage 5: JSON parse FAILED — storing raw LLM response as fallback")
+        parsed = []
+        content_str = (
+            "# Feature Set\n\n"
+            "> ⚠️ Could not parse structured features. Raw output below. Re-run to try again.\n\n"
+            "---\n\n" + raw
+        )
+    return {"structured": parsed, "content_str": content_str}
 
 
 # ---------------------------------------------------------------------------
@@ -953,9 +1064,9 @@ Return ONLY a valid JSON ARRAY:
 
 def _stage_prompts(ss: dict, work_dir: str) -> dict:
     intake = _get_intake(ss)
-    selected_opp = ss.get("selected_opportunity", {})
-    selected_arch = ss.get("selected_archetype", {})
-    selected_features = ss.get("selected_features", [])
+    selected_opp = ss.get("selected_opportunity") or {}
+    selected_arch = ss.get("selected_archetype") or {}
+    selected_features = ss.get("selected_features") or []
 
     for var, val in [("opp", selected_opp), ("arch", selected_arch)]:
         if isinstance(val, str):
@@ -963,6 +1074,8 @@ def _stage_prompts(ss: dict, work_dir: str) -> dict:
                 val = json.loads(val)
             except (json.JSONDecodeError, TypeError):
                 val = {"title": val}
+        if not isinstance(val, dict):
+            val = {}
         if var == "opp":
             selected_opp = val
         else:
@@ -1009,11 +1122,11 @@ Return ONLY valid JSON (no markdown fences):
 
 def _stage_slide_content(ss: dict, work_dir: str) -> dict:
     intake = _get_intake(ss)
-    research = ss.get("research_summary", {})
-    problem = ss.get("problem_definition", {})
-    selected_opp = ss.get("selected_opportunity", {})
-    selected_arch = ss.get("selected_archetype", {})
-    features = ss.get("selected_features", [])
+    research = ss.get("research_summary") or {}
+    problem = ss.get("problem_definition") or {}
+    selected_opp = ss.get("selected_opportunity") or {}
+    selected_arch = ss.get("selected_archetype") or {}
+    features = ss.get("selected_features") or []
 
     for var, val in [("opp", selected_opp), ("arch", selected_arch), ("prob", problem)]:
         if isinstance(val, str):
@@ -1021,6 +1134,8 @@ def _stage_slide_content(ss: dict, work_dir: str) -> dict:
                 val = json.loads(val)
             except (json.JSONDecodeError, TypeError):
                 val = {}
+        if not isinstance(val, dict):
+            val = {}
         if var == "opp":
             selected_opp = val
         elif var == "arch":

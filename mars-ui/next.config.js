@@ -1,4 +1,5 @@
 /** @type {import('next').NextConfig} */
+const path = require('path');
 const backendUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const nextConfig = {
@@ -7,6 +8,11 @@ const nextConfig = {
 
   // Disable the "X-Powered-By" header
   poweredByHeader: false,
+
+  // Explicitly set turbopack root to avoid conflicts with multiple lockfiles
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
 
   async rewrites() {
     return [

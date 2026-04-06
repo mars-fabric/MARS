@@ -1052,6 +1052,10 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
           error, isLoading, fetchStageContent, saveStageContent, refineContent,
           executeStage, createTask, resumeTask, stageContents, setStageContent } = hook
 
+  // Track which stages we've already fetched content for (prevents infinite re-fetch when
+  // content is empty string, and ensures structured data is populated after resume)
+  const fetchedStagesRef = useRef(new Set<number>())
+
   // Resume from a previous session on mount
   useEffect(() => {
     if (resumeTaskId) {
@@ -1098,7 +1102,7 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
   }, [createTask, intake, executeStage, setCurrentStep])
 
   // ---------------------------------------------------------------------------
-  // Load stage content when step changes
+  // Load stage content when step changes or stage completes
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
@@ -1108,13 +1112,19 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
     // Check if stage is completed
     const stage = taskState?.stages.find(s => s.stage_number === stageNum)
     if (stage?.status !== 'completed') return
-    if (stageContents[stageNum]) return // already loaded
+
+    // Use a ref-based guard (not state) to prevent infinite loops when content is empty
+    // and to ensure structured data is always extracted (including after resume)
+    if (fetchedStagesRef.current.has(stageNum)) return
+    fetchedStagesRef.current.add(stageNum)
 
     fetchStageContent(stageNum).then(content => {
-      if (!content?.content) return
-      setStageContent(stageNum, content.content)
+      if (!content) return
 
-      // Parse structured data for selection stages
+      // Set text content (may be empty string if backend had no file)
+      if (content.content) setStageContent(stageNum, content.content)
+
+      // Always extract structured data for selection stages, even if content is empty
       if (stageNum === 3 && content.shared_state?.opportunities) {
         const opps = content.shared_state.opportunities
         setOpportunities(Array.isArray(opps) ? opps as OpportunityArea[] : [])
@@ -1131,7 +1141,9 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
         )
       }
     })
-  }, [currentStep, taskId, taskState, fetchStageContent, stageContents])
+  // stageContents intentionally excluded — fetchedStagesRef is the guard
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStep, taskId, taskState, fetchStageContent])
 
   // ---------------------------------------------------------------------------
   // Navigation between steps
@@ -1160,6 +1172,10 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
 
     setCurrentStep(nextStep)
 
+    // If next stage is already completed, just navigate — no need to re-execute
+    const nextStageInfo = taskState?.stages.find(s => s.stage_number === nextStep)
+    if (nextStageInfo?.status === 'completed') return
+
     // Execute the next stage with selections as input_data
     const inputData: Record<string, unknown> = {}
     if (currentStep === 3 && selectedOpportunity) {
@@ -1177,7 +1193,7 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
       await executeStage(nextStep, inputData)
     }
   }, [
-    canAdvance, isExecuting, currentStep, executeStage, setCurrentStep,
+    canAdvance, isExecuting, currentStep, taskState, executeStage, setCurrentStep,
     selectedOpportunity, selectedArchetype, selectedFeatures,
   ])
 
@@ -1191,9 +1207,14 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
     if (selectedArchetype) inputData.selected_archetype = selectedArchetype
     if (selectedFeatures.length > 0) inputData.selected_features = selectedFeatures
 
-    setStageContent(stageNum, '')  // clear cache for this stage so it reloads after rerun
+    setStageContent(stageNum, '')  // clear content cache so it reloads after rerun
+    fetchedStagesRef.current.delete(stageNum)  // allow re-fetch after new execution
+    // Also clear downstream structured data when re-running upstream stages
+    if (stageNum <= 3) { setOpportunities([]); setSelectedOpportunity(null) }
+    if (stageNum <= 4) { setArchetypes([]); setSelectedArchetype(null) }
+    if (stageNum <= 5) { setFeatures([]); setSelectedFeatures([]) }
     await executeStage(stageNum, inputData)
-  }, [taskId, isExecuting, currentStep, executeStage, selectedOpportunity, selectedArchetype, selectedFeatures])
+  }, [taskId, isExecuting, currentStep, executeStage, selectedOpportunity, selectedArchetype, selectedFeatures, setStageContent])
 
   const handleSaveContent = useCallback(async (content: string) => {
     const stageNum = currentStep as number
@@ -1563,13 +1584,28 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
     const content = stageContents[stageNum] ?? ''
     const stageName = STAGE_NAME_MAP[stageNum] ?? `stage_${stageNum}`
 
-    // Running — show console output
-    if (status === 'running' || (isExecuting && !stageContents[stageNum])) {
+    // Running or actively executing — show spinner with console output
+    if (status === 'running' || (isExecuting && !content)) {
       return (
         <StageSpinner
           stageName={stageName}
           consoleOutput={consoleOutput}
         />
+      )
+    }
+
+    // Stage completed but content not yet fetched from API (brief transition state)
+    if (status === 'completed' && stageContents[stageNum] === undefined) {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <Loader2
+            className="w-8 h-8 animate-spin"
+            style={{ color: 'var(--mars-color-primary)' }}
+          />
+          <p className="text-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+            Loading results…
+          </p>
+        </div>
       )
     }
 
@@ -1600,6 +1636,38 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               return Array.isArray(arr) ? arr as OpportunityArea[] : []
             } catch { return [] }
           })()
+
+      // JSON parse failed — show retry banner
+      if (opps.length === 0) {
+        return (
+          <div className="space-y-4 p-4">
+            <div className="flex items-start gap-3 p-4 rounded-xl border"
+              style={{ borderColor: '#f59e0b', background: 'rgba(245,158,11,0.07)' }}>
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold mb-1" style={{ color: 'var(--mars-color-text)' }}>
+                  Could not display structured opportunity areas
+                </p>
+                <p className="text-xs mb-3" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                  The AI response couldn't be parsed into opportunity cards. Click &ldquo;Re-run&rdquo; to try again.
+                </p>
+                <Button variant="ghost" size="sm" onClick={handleRerun} disabled={isExecuting}>
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Re-run Stage
+                </Button>
+              </div>
+            </div>
+            {content && content.length > 50 && (
+              <ReviewPanel
+                content={content}
+                stageNum={stageNum}
+                stageName={stageName}
+                onSave={handleSaveContent}
+                onRefine={handleRefineContent}
+              />
+            )}
+          </div>
+        )
+      }
 
       return (
         <div className="space-y-4 p-4">
@@ -1647,15 +1715,6 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               )}
             </div>
           ))}
-          {opps.length === 0 && content && (
-            <ReviewPanel
-              content={content}
-              stageNum={stageNum}
-              stageName={stageName}
-              onSave={handleSaveContent}
-              onRefine={handleRefineContent}
-            />
-          )}
         </div>
       )
     }
@@ -1670,6 +1729,39 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               return Array.isArray(arr) ? arr as SolutionArchetype[] : []
             } catch { return [] }
           })()
+
+      // JSON parse failed but we may have raw LLM text — show it + retry option
+      if (archs.length === 0) {
+        return (
+          <div className="space-y-4 p-4">
+            <div className="flex items-start gap-3 p-4 rounded-xl border"
+              style={{ borderColor: '#f59e0b', background: 'rgba(245,158,11,0.07)' }}>
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold mb-1" style={{ color: 'var(--mars-color-text)' }}>
+                  Could not display structured archetypes
+                </p>
+                <p className="text-xs mb-3" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                  The AI generated a response but it couldn't be parsed into cards (often due to a very large
+                  response). Click &ldquo;Re-run&rdquo; to try again, or review the raw content below.
+                </p>
+                <Button variant="ghost" size="sm" onClick={handleRerun} disabled={isExecuting}>
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Re-run Stage
+                </Button>
+              </div>
+            </div>
+            {content && content.length > 50 && (
+              <ReviewPanel
+                content={content}
+                stageNum={stageNum}
+                stageName={stageName}
+                onSave={handleSaveContent}
+                onRefine={handleRefineContent}
+              />
+            )}
+          </div>
+        )
+      }
 
       return (
         <div className="space-y-4 p-4">
@@ -1699,7 +1791,7 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               <p className="text-sm mb-3" style={{ color: 'var(--mars-color-text-secondary)' }}>
                 {arch.summary}
               </p>
-              {arch.benefits.length > 0 && (
+              {(arch.benefits?.length ?? 0) > 0 && (
                 <ul className="space-y-0.5">
                   {arch.benefits.slice(0, 3).map((b, i) => {
                     const label = typeof b === 'string' ? b : (b as any).benefit || (b as any).description || JSON.stringify(b)
@@ -1727,6 +1819,38 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
               return Array.isArray(arr) ? arr as Feature[] : []
             } catch { return [] }
           })()
+
+      // JSON parse failed — show retry banner + raw content
+      if (feats.length === 0) {
+        return (
+          <div className="space-y-4 p-4">
+            <div className="flex items-start gap-3 p-4 rounded-xl border"
+              style={{ borderColor: '#f59e0b', background: 'rgba(245,158,11,0.07)' }}>
+              <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold mb-1" style={{ color: 'var(--mars-color-text)' }}>
+                  Could not display structured features
+                </p>
+                <p className="text-xs mb-3" style={{ color: 'var(--mars-color-text-secondary)' }}>
+                  The AI response couldn't be parsed into feature cards. Click &ldquo;Re-run&rdquo; to try again.
+                </p>
+                <Button variant="ghost" size="sm" onClick={handleRerun} disabled={isExecuting}>
+                  <RotateCcw className="w-3.5 h-3.5 mr-1.5" /> Re-run Stage
+                </Button>
+              </div>
+            </div>
+            {content && content.length > 50 && (
+              <ReviewPanel
+                content={content}
+                stageNum={stageNum}
+                stageName={stageName}
+                onSave={handleSaveContent}
+                onRefine={handleRefineContent}
+              />
+            )}
+          </div>
+        )
+      }
 
       return (
         <div className="space-y-4 p-4">
@@ -1805,28 +1929,40 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
     }
 
     // Stage 6 — AI Builder Prompts (custom tabbed view)
-    if (stageNum === 6 && status === 'completed' && content) {
+    if (stageNum === 6 && status === 'completed') {
       return (
         <div className="p-4 h-full overflow-hidden flex flex-col">
-          <PromptsPanel
-            content={content}
-            onSave={handleSaveContent}
-            onRefine={handleRefineContent}
-          />
+          {content ? (
+            <PromptsPanel
+              content={content}
+              onSave={handleSaveContent}
+              onRefine={handleRefineContent}
+            />
+          ) : (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--mars-color-primary)' }} />
+            </div>
+          )}
         </div>
       )
     }
 
     // Stage 7 — Slide Content (presentation viewer + PDF export)
-    if (stageNum === 7 && status === 'completed' && content) {
+    if (stageNum === 7 && status === 'completed') {
       return (
         <div className="p-4 h-full overflow-hidden flex flex-col">
-          <SlidesPanel
-            content={content}
-            clientName={taskState?.client_name || intake.clientName || 'pda'}
-            onSave={handleSaveContent}
-            onRefine={handleRefineContent}
-          />
+          {content ? (
+            <SlidesPanel
+              content={content}
+              clientName={taskState?.client_name || intake.clientName || 'pda'}
+              onSave={handleSaveContent}
+              onRefine={handleRefineContent}
+            />
+          ) : (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--mars-color-primary)' }} />
+            </div>
+          )}
         </div>
       )
     }
@@ -1842,6 +1978,25 @@ export default function ProductDiscoveryTask({ onBack, resumeTaskId }: ProductDi
             onSave={handleSaveContent}
             onRefine={handleRefineContent}
           />
+        </div>
+      )
+    }
+
+    // Completed but content is empty (LLM returned no usable output)
+    if (status === 'completed') {
+      return (
+        <div className="flex flex-col items-center justify-center py-20 gap-4">
+          <AlertCircle className="w-10 h-10" style={{ color: '#f59e0b' }} />
+          <h3 className="text-base font-semibold" style={{ color: 'var(--mars-color-text)' }}>
+            No content generated
+          </h3>
+          <p className="text-sm text-center max-w-sm" style={{ color: 'var(--mars-color-text-secondary)' }}>
+            The stage completed but produced no output. This can happen with large or complex
+            responses. Try re-running the stage.
+          </p>
+          <Button variant="ghost" size="sm" onClick={handleRerun}>
+            <RotateCcw className="w-4 h-4 mr-2" /> Re-run Stage
+          </Button>
         </div>
       )
     }
