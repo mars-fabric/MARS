@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { FileText, ArrowRight, X, TrendingUp, Lightbulb } from 'lucide-react'
 import TaskList from '@/components/tasks/TaskList'
-import AIWeeklyTaskEnhanced from '@/components/tasks/AIWeeklyTaskEnhanced'
+import AIWeeklyReportTask from '@/components/tasks/AIWeeklyReportTask'
 import ReleaseNotesTask from '@/components/tasks/ReleaseNotesTask'
 import CodeReviewTask from '@/components/tasks/CodeReviewTask'
 import ProductDiscoveryTask from '@/components/tasks/ProductDiscoveryTask'
@@ -73,6 +73,7 @@ export default function TasksPage() {
   const [recentTasks, setRecentTasks] = useState<RecentDeepresearchTask[]>([])
   const [recentNpTasks, setRecentNpTasks] = useState<RecentNewsPulseTask[]>([])
   const [recentPdaTasks, setRecentPdaTasks] = useState<RecentPdaTask[]>([])
+
   const [loadingRecent, setLoadingRecent] = useState(false)
 
   const fetchRecentTasks = useCallback(async () => {
@@ -123,6 +124,8 @@ export default function TasksPage() {
     setActiveTask('product-discovery')
   }, [])
 
+
+
   const handleBack = useCallback(() => {
     setActiveTask(null)
     setResumeTaskId(null)
@@ -161,9 +164,11 @@ export default function TasksPage() {
     }
   }, [])
 
+
+
   // When a task is opened, render its component
   if (activeTask === 'ai-weekly') {
-    return <AIWeeklyTaskEnhanced onBack={handleBack} />
+    return <AIWeeklyReportTask onBack={handleBack} resumeTaskId={resumeTaskId} />
   }
   if (activeTask === 'release-notes') {
     return <ReleaseNotesTask onBack={handleBack} />

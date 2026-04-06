@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useEffect, useCallback } from 'react'
-import { ArrowLeft, Trash2, RotateCcw } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { ArrowLeft, Trash2, RotateCcw, ArrowRight, X, BookOpen } from 'lucide-react'
 import { Button } from '@/components/core'
 import Stepper from '@/components/core/Stepper'
 import type { StepperStep } from '@/components/core/Stepper'
@@ -12,6 +12,26 @@ import RfpSetupPanel from '@/components/rfp/RfpSetupPanel'
 import RfpReviewPanel from '@/components/rfp/RfpReviewPanel'
 import RfpExecutionPanel from '@/components/rfp/RfpExecutionPanel'
 import RfpProposalPanel from '@/components/rfp/RfpProposalPanel'
+import { getApiUrl } from '@/lib/config'
+
+interface RecentRfpTask {
+    task_id: string
+    task: string
+    status: string
+    created_at: string | null
+    current_stage: number | null
+    progress_percent: number
+}
+
+const RFP_STAGE_LABEL_MAP: Record<number, string> = {
+    1: 'Requirements Analysis',
+    2: 'Tools & Technology',
+    3: 'Cloud & Infrastructure',
+    4: 'Implementation Plan',
+    5: 'Architecture Design',
+    6: 'Execution Strategy',
+    7: 'Proposal Compilation',
+}
 
 interface RfpProposalTaskProps {
     onBack: () => void
@@ -33,12 +53,38 @@ export default function RfpProposalTask({ onBack, resumeTaskId }: RfpProposalTas
         clearError,
     } = hook
 
+    const [recentTasks, setRecentTasks] = useState<RecentRfpTask[]>([])
+
+    // Fetch recent in-progress tasks (always, not just when no active task)
+    useEffect(() => {
+        if (resumeTaskId) return
+        let cancelled = false
+        fetch(getApiUrl('/api/rfp/recent'))
+            .then(r => r.ok ? r.json() : [])
+            .then((data: RecentRfpTask[]) => { if (!cancelled) setRecentTasks(data) })
+            .catch(() => { })
+        return () => { cancelled = true }
+    }, [resumeTaskId])
+
     // Resume on mount
     useEffect(() => {
         if (resumeTaskId) {
             resumeTask(resumeTaskId)
         }
     }, [resumeTaskId, resumeTask])
+
+    const handleResumeRecent = useCallback((id: string) => {
+        resumeTask(id)
+    }, [resumeTask])
+
+    const handleDeleteRecent = useCallback(async (id: string, e: React.MouseEvent) => {
+        e.stopPropagation()
+        if (!confirm('Delete this RFP Proposal task? This will remove all data and files.')) return
+        try {
+            await fetch(getApiUrl(`/api/rfp/${id}`), { method: 'DELETE' })
+            setRecentTasks(prev => prev.filter(t => t.task_id !== id))
+        } catch { /* ignore */ }
+    }, [])
 
     // Build stepper steps
     const stepperSteps: StepperStep[] = RFP_STEP_LABELS.map((label, idx) => {
@@ -112,8 +158,56 @@ export default function RfpProposalTask({ onBack, resumeTaskId }: RfpProposalTas
         await resetFromStage(nextStage)
     }, [currentStep, resetFromStage])
 
+    // Filter out the currently active task from recent list
+    const visibleRecentTasks = recentTasks.filter(t => t.task_id !== taskId)
+
     return (
         <div className="p-6 max-w-7xl mx-auto">
+            {/* In-progress tasks section */}
+            {currentStep === 0 && visibleRecentTasks.length > 0 && (
+                <div className="mb-6 space-y-2">
+                    <h3 className="text-xs font-medium uppercase tracking-wider"
+                        style={{ color: 'var(--mars-color-text-tertiary)' }}>
+                        In Progress
+                    </h3>
+                    {visibleRecentTasks.map((task) => (
+                        <button key={task.task_id} onClick={() => handleResumeRecent(task.task_id)}
+                            className="w-full flex items-center gap-3 p-3 rounded-mars-md border transition-colors hover:border-[var(--mars-color-primary)]"
+                            style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
+                            <div className="flex-shrink-0 w-8 h-8 rounded-mars-md flex items-center justify-center"
+                                style={{ background: 'linear-gradient(135deg, #ec4899, #f43f5e)' }}>
+                                <BookOpen className="w-4 h-4 text-white" />
+                            </div>
+                            <div className="flex-1 text-left min-w-0">
+                                <p className="text-sm font-medium truncate" style={{ color: 'var(--mars-color-text)' }}>
+                                    RFP Proposal{task.task ? ` — ${task.task}` : ''}
+                                </p>
+                                <p className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
+                                    {task.current_stage
+                                        ? `Stage ${task.current_stage}: ${RFP_STAGE_LABEL_MAP[task.current_stage] || ''}`
+                                        : 'Starting...'}
+                                    {' '}&middot;{' '}
+                                    {Math.round(task.progress_percent)}% complete
+                                </p>
+                            </div>
+                            <div className="flex-shrink-0 w-20 h-1.5 rounded-full overflow-hidden"
+                                style={{ backgroundColor: 'var(--mars-color-surface-overlay)' }}>
+                                <div className="h-full rounded-full transition-all"
+                                    style={{ width: `${Math.max(5, task.progress_percent)}%`, background: 'linear-gradient(90deg, #ec4899, #f43f5e)' }} />
+                            </div>
+                            <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--mars-color-text-tertiary)' }} />
+                            <div role="button" tabIndex={0}
+                                onClick={(e) => handleDeleteRecent(task.task_id, e)}
+                                onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteRecent(task.task_id, e as unknown as React.MouseEvent) }}
+                                className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
+                                title="Delete task">
+                                <X className="w-3.5 h-3.5" style={{ color: 'var(--mars-color-text-tertiary)' }} />
+                            </div>
+                        </button>
+                    ))}
+                </div>
+            )}
+
             {/* Header */}
             <div className="flex items-center gap-3 mb-6">
                 <button

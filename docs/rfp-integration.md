@@ -101,22 +101,24 @@ backend/
 │   └── rfp_schemas.py         # Pydantic request/response schemas
 ├── routers/
 │   ├── __init__.py            # Router registration
-│   ├── rfp.py                 # RFP REST API + execution engine (~950 lines)
+│   ├── rfp.py                 # RFP REST API + execution engine (~1,090 lines)
 │   └── files.py               # File upload/download endpoint
 ├── services/
 │   ├── pdf_extractor.py       # Rich PDF extraction (text, tables, images)
 │   └── session_manager.py     # Session lifecycle
 
 cmbagent/phases/rfp/
-├── __init__.py                # Imports all phase classes
-├── base.py                    # RfpPhaseBase — generate→review cycle engine
+├── __init__.py                # Imports all phase + config classes
+├── base.py                    # RfpPhaseBase — generate→specialist→review engine
 ├── requirements_phase.py      # Stage 1: RfpRequirementsPhase
 ├── tools_phase.py             # Stage 2: RfpToolsPhase
 ├── cloud_phase.py             # Stage 3: RfpCloudPhase
 ├── implementation_phase.py    # Stage 4: RfpImplementationPhase
 ├── architecture_phase.py      # Stage 5: RfpArchitecturePhase
 ├── execution_phase.py         # Stage 6: RfpExecutionPhase
-└── proposal_phase.py          # Stage 7: RfpProposalPhase
+├── proposal_phase.py          # Stage 7: RfpProposalPhase
+├── agent_teams.py             # Specialist team definitions for multi-agent pipeline
+└── token_utils.py             # Token counting, chunking, and capacity management
 
 mars-ui/
 ├── app/tasks/page.tsx         # Task routing ("rfp-proposal" → RfpProposalTask)
@@ -130,6 +132,7 @@ mars-ui/
         ├── RfpSetupPanel.tsx   # Step 0: RFP content + file upload
         ├── RfpReviewPanel.tsx  # Steps 1–6: edit/preview + refinement chat
         ├── RfpExecutionPanel.tsx # Per-stage execution monitoring
+        ├── RfpStageAdvancedSettings.tsx # Per-stage model + config overrides
         └── RfpProposalPanel.tsx # Step 7: final proposal + downloads
 
 cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
@@ -193,7 +196,7 @@ cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
 - Why other providers were NOT selected
 - Compute, storage, networking, security architecture
 - Managed Services Comparison across providers
-- Detailed cost breakdown (Monthly + Annual, USD only)
+- Detailed cost breakdown (Monthly + Annual, in currency detected from RFP)
 - Cost optimization strategy
 
 **Input:** `requirements_analysis` + `tools_technology`
@@ -254,7 +257,7 @@ cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
 
 ```
 Phase (cmbagent/phases/base.py)             # Abstract base
-  └── RfpPhaseBase (cmbagent/phases/rfp/base.py)  # Generate→review engine
+  └── RfpPhaseBase (cmbagent/phases/rfp/base.py)  # Generate→specialist→review engine
         ├── RfpRequirementsPhase             # Stage 1
         ├── RfpToolsPhase                    # Stage 2
         ├── RfpCloudPhase                    # Stage 3
@@ -275,7 +278,7 @@ Each phase subclass provides:
 - `review_system_prompt` — Reviewer persona for review pass (inherited from base)
 - `build_user_prompt(context)` — Constructs the prompt from shared_state
 
-### Generate → Review Cycle
+### Generate → Specialist → Review Cycle
 
 ```
 RfpPhaseBase.execute(context)
@@ -286,6 +289,11 @@ RfpPhaseBase.execute(context)
   │     system = self.system_prompt
   │     user   = self.build_user_prompt(context)
   │     → content (draft)
+  │
+  ├── 2b. Specialist pass (1 LLM call, if multi_agent=True):
+  │     system = specialist persona (from agent_teams.py)
+  │     user   = draft + specialist instructions
+  │     → content (specialist-improved)
   │
   ├── 3. Review pass(es) (n_reviews × 1 LLM call each):
   │     system = self.review_system_prompt
@@ -429,7 +437,9 @@ All endpoints are prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | POST | `/{task_id}/stages/{N}/refine` | LLM refinement of content |
 | GET | `/{task_id}/stages/{N}/console` | Console output (polling) |
 | POST | `/{task_id}/reset-from/{N}` | Reset stage N+ back to pending |
+| POST | `/{task_id}/stop` | Cancel running stage, mark task as failed |
 | GET | `/{task_id}/download/{filename}` | Download artifact file |
+| GET | `/{task_id}/download-pdf` | Generate + download proposal as PDF |
 | DELETE | `/{task_id}` | Delete task + work directory |
 
 ### WebSocket Endpoint
@@ -474,7 +484,7 @@ Source: `cmbagent/database/models.py`, `cmbagent/database/repository.py`
 | `mode` | `"rfp-proposal"` |
 | `agent` | `"phase_orchestrator"` |
 | `model` | Dynamic from `WorkflowConfig` |
-| `status` | `"executing"` → `"completed"` / `"failed"` |
+| `status` | `"executing"` → `"completed"` (auto-set when all 7 stages complete) / `"failed"` |
 | `task_description` | User's RFP text |
 | `meta` | `{ work_dir, rfp_context, config, session_id, orchestration: "phase-based" }` |
 
@@ -543,7 +553,7 @@ Each phase defines three key prompts: `system_prompt` (primary agent persona), `
 
 Key types: `RfpTaskState`, `RfpStage`, `RfpWizardStep` (0–7), `RfpStageConfig`
 
-Constants: `RFP_STEP_LABELS`, `RFP_WIZARD_STEP_TO_STAGE`, `RFP_STAGE_SHARED_KEYS`, `RFP_STAGE_NAMES`, `RFP_AVAILABLE_MODELS` (9 models)
+Constants: `RFP_STEP_LABELS`, `RFP_WIZARD_STEP_TO_STAGE`, `RFP_STAGE_SHARED_KEYS`, `RFP_STAGE_NAMES`, `RFP_AVAILABLE_MODELS` (11 entries, 10 unique models — `gpt-4o` duplicated)
 
 ### State Management Hook (`mars-ui/hooks/useRfpTask.ts`)
 
@@ -553,17 +563,17 @@ Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageCont
 
 ### Wizard Container (`mars-ui/components/tasks/RfpProposalTask.tsx`)
 
-8-step wizard with `Stepper` navigation:
+8-step wizard with `Stepper` navigation. On mount, fetches `GET /api/rfp/recent` for in-progress tasks. When on Step 0, the "In Progress" cards render **above the setup panel** (inside the same view — not a separate landing page):
 
 | Step | Component | Stage |
 |------|-----------|-------|
-| 0 | `RfpSetupPanel` | (no stage) |
+| 0 | In-progress cards + `RfpSetupPanel` (with model settings) | (no stage) |
 | 1–6 | `RfpReviewPanel` | Stages 1–6 |
 | 7 | `RfpProposalPanel` | Stage 7 |
 
 ### Panel Components
 
-- **RfpSetupPanel** — File upload (above textarea), RFP content textarea (auto-populated from PDF), additional context, "Analyze Requirements" button
+- **RfpSetupPanel** — File upload (above textarea), RFP content textarea (auto-populated from PDF), additional context, model settings toggle (gear icon → `RfpStageAdvancedSettings.tsx` using centralized `useModelConfig()` hook), "Analyze Requirements" button
 - **RfpReviewPanel** — 60% editor/preview + 40% refinement chat, auto-save (1s debounce), stage execution monitoring
 - **RfpProposalPanel** — Success banner, proposal preview, download links for all 7 artifacts
 
@@ -604,7 +614,37 @@ Uses PyMuPDF (fitz) to extract:
 
 ## 13. Task Resumption
 
+### Resume Flow — In Progress Section
+
+When `RfpProposalTask.tsx` loads, it fetches incomplete RFP tasks via `GET /api/rfp/recent` on mount (regardless of whether there's an active task). On Step 0, if any exist, they appear as **"In Progress" cards rendered above the setup panel** with:
+
+- Pink/rose BookOpen icon
+- Task name + current stage + progress bar
+- **Resume arrow** — calls `resumeTask(id)` to load the task at the correct step
+- **Delete (X) button** — calls `DELETE /api/rfp/{id}` after confirm dialog
+
+The currently active task is filtered out of the in-progress list to avoid duplication. Both the in-progress cards and the setup form are always visible together — not a separate landing page.
+
+### Resume Logic
+
 `GET /api/rfp/recent` → lists incomplete tasks → user selects → `resumeTask(taskId)` loads full state and sets wizard position based on stage statuses (running → reconnect WS, completed → advance, pending/failed → stop).
+
+### Workflow Run Auto-Completion
+
+When the final stage of an RFP task completes, `_run_rfp_stage()` automatically checks whether all `TaskStage` rows have `status == "completed"`. If so, it transitions the parent `WorkflowRun`:
+
+- `status` → `"completed"`
+- `completed_at` → current UTC timestamp
+
+This prevents finished tasks from appearing in the `GET /api/rfp/recent` endpoint (which only returns `status="executing"` runs), ensuring the "In Progress" section accurately reflects only genuinely active work.
+
+### Stop / Cancel
+
+`POST /api/rfp/{id}/stop` cancels any running `asyncio.Task` background stages and marks them as `failed` with error `"Stopped by user"`. The parent `WorkflowRun.status` is set to `"failed"`.
+
+### Model Settings
+
+The setup panel includes a **Model Settings** toggle (gear icon) that exposes the centralized model selector via `RfpStageAdvancedSettings.tsx`. It uses the `useModelConfig()` hook to fetch available models from `/api/models/config` (falls back to a static list if the API is unavailable). The selected model is stored in `taskConfig.model` and passed as `config_overrides.model` in the execute request for **every stage** — the `useCallback` dependency array correctly includes `taskConfig` so model changes are never stale.
 
 ---
 
@@ -661,9 +701,9 @@ Users can override per-stage via `config_overrides` in the execute request.
 > **Azure deployment:** Ensure `AZURE_OPENAI_DEPLOYMENT` is set to your deployment name.
 > Set `CMBAGENT_DEFAULT_MODEL` environment variable or update `WorkflowConfig` to change the model for all stages.
 
-### Available Models (10)
+### Available Models (11 entries, 10 unique)
 
-GPT-5.3, GPT-4.1, GPT-4.1 Mini, GPT-4o, GPT-4o Mini, o3-mini, Gemini 2.5 Pro, Gemini 2.5 Flash, Claude Sonnet 4, Claude 3.5 Sonnet
+GPT-4o (×2 — duplicate), GPT-5.3, GPT-4.1, GPT-4.1 Mini, GPT-4o Mini, o3-mini, Gemini 2.5 Pro, Gemini 2.5 Flash, Claude Sonnet 4, Claude 3.5 Sonnet
 
 ---
 

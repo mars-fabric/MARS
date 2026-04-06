@@ -402,6 +402,16 @@ async def _run_rfp_stage(
                 output_files=[file_name] if file_name else [],
             )
 
+        # If all stages are now completed, mark the workflow run as completed
+        all_stages = repo.list_stages(parent_run_id=task_id)
+        if all_stages and all(s.status == "completed" for s in all_stages):
+            from cmbagent.database.models import WorkflowRun
+            run = db.query(WorkflowRun).filter(WorkflowRun.id == task_id).first()
+            if run and run.status != "completed":
+                run.status = "completed"
+                run.completed_at = datetime.now(timezone.utc)
+                db.commit()
+
     except Exception as e:
         logger.error(f"RFP stage {stage_num} failed: {e}", exc_info=True)
         # Write error to console buffer so the UI can display it
@@ -569,13 +579,19 @@ async def get_recent_rfp_tasks():
                     current = s.stage_number
                     break
 
+            pct = progress.get("progress_percent", 0) if isinstance(progress, dict) else 0
+
+            # Skip fully-completed tasks
+            if pct >= 100:
+                continue
+
             results.append(RfpRecentTaskResponse(
                 task_id=run.id,
                 task=run.task_description or "",
                 status=run.status,
                 created_at=run.started_at.isoformat() if run.started_at else None,
                 current_stage=current,
-                progress_percent=progress.get("progress_percent", 0) if isinstance(progress, dict) else 0,
+                progress_percent=pct,
             ))
 
         return results
@@ -1001,6 +1017,47 @@ async def download_rfp_pdf(task_id: str, inline: bool = False):
             media_type="application/pdf",
             headers={"Content-Disposition": disposition},
         )
+    finally:
+        db.close()
+
+
+# =============================================================================
+# Stop a running task
+# =============================================================================
+@router.post("/{task_id}/stop")
+async def stop_rfp_task(task_id: str):
+    """Stop a running RFP task.
+
+    Cancels any executing background stage and marks it as failed.
+    """
+    # Cancel any running asyncio tasks for this task_id
+    cancelled = []
+    for key in list(_running_tasks):
+        if key.startswith(f"{task_id}:"):
+            bg_task = _running_tasks.get(key)
+            if bg_task and not bg_task.done():
+                bg_task.cancel()
+                cancelled.append(key)
+
+    # Update DB: mark running stages as failed
+    db = _get_db()
+    try:
+        from cmbagent.database.models import WorkflowRun
+        parent = db.query(WorkflowRun).filter(WorkflowRun.id == task_id).first()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        session_id = parent.session_id
+        repo = _get_stage_repo(db, session_id=session_id)
+        stages = repo.list_stages(parent_run_id=task_id)
+        for s in stages:
+            if s.status == "running":
+                repo.update_stage_status(s.id, "failed", error_message="Stopped by user")
+
+        parent.status = "failed"
+        db.commit()
+
+        return {"status": "stopped", "task_id": task_id, "cancelled_stages": cancelled}
     finally:
         db.close()
 

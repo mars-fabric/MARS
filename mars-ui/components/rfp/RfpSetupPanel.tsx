@@ -1,10 +1,12 @@
 'use client'
 
 import React, { useState, useCallback, useEffect } from 'react'
-import { Sparkles, Upload, FileText } from 'lucide-react'
+import { Sparkles, Upload, FileText, Settings2 } from 'lucide-react'
 import { Button } from '@/components/core'
 import FileUploadZone from '@/components/deepresearch/FileUploadZone'
+import RfpStageAdvancedSettings from './RfpStageAdvancedSettings'
 import type { useRfpTask } from '@/hooks/useRfpTask'
+import type { RfpStageConfig } from '@/types/rfp'
 
 interface RfpSetupPanelProps {
     hook: ReturnType<typeof useRfpTask>
@@ -19,11 +21,18 @@ export default function RfpSetupPanel({ hook, onNext }: RfpSetupPanelProps) {
         lastExtractedText,
         isLoading,
         executeStage,
+        taskConfig,
+        setTaskConfig,
     } = hook
 
     const [rfpText, setRfpText] = useState('')
     const [rfpContext, setRfpContext] = useState('')
     const [submitted, setSubmitted] = useState(false)
+    const [showSettings, setShowSettings] = useState(false)
+
+    const updateCfg = useCallback((patch: Partial<RfpStageConfig>) => {
+        setTaskConfig({ ...taskConfig, ...patch })
+    }, [taskConfig, setTaskConfig])
 
     // Auto-populate the textarea when PDF text is extracted from an upload
     useEffect(() => {
@@ -127,6 +136,41 @@ export default function RfpSetupPanel({ hook, onNext }: RfpSetupPanelProps) {
                         color: 'var(--mars-color-text)',
                     }}
                 />
+            </div>
+
+            {/* Model Settings */}
+            <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                    <span
+                        className="text-xs font-medium"
+                        style={{ color: 'var(--mars-color-text-secondary)' }}
+                    >
+                        Model settings
+                    </span>
+                    <button
+                        onClick={() => setShowSettings(s => !s)}
+                        title="Advanced model settings"
+                        className="p-1.5 rounded-mars-sm transition-colors"
+                        style={{
+                            color: showSettings ? 'var(--mars-color-accent)' : 'var(--mars-color-text-secondary)',
+                            backgroundColor: showSettings ? 'var(--mars-color-accent-subtle, rgba(99,102,241,0.1))' : 'transparent',
+                        }}
+                    >
+                        <Settings2 className="w-4 h-4" />
+                    </button>
+                </div>
+
+                {showSettings && (
+                    <div
+                        className="p-4 rounded-mars-md border"
+                        style={{
+                            backgroundColor: 'var(--mars-color-surface-overlay)',
+                            borderColor: 'var(--mars-color-border)',
+                        }}
+                    >
+                        <RfpStageAdvancedSettings cfg={taskConfig} updateCfg={updateCfg} />
+                    </div>
+                )}
             </div>
 
             {/* Submit */}

@@ -24,8 +24,7 @@ from .news_tools import (
     gnews_search,
     multi_engine_web_search,
     newsapi_search,
-    prwire_search,
-    rss_company_announcements,
+    scrape_official_news_pages,
     verify_url,
     verify_reference_links,
 )
@@ -124,8 +123,7 @@ class AG2FreeToolsLoader:
             announcements_noauth,
             newsapi_search,
             gnews_search,
-            rss_company_announcements,
-            prwire_search,
+            scrape_official_news_pages,
             multi_engine_web_search,
             curated_ai_sources_catalog,
             curated_ai_sources_search,
@@ -133,11 +131,10 @@ class AG2FreeToolsLoader:
             verify_reference_links,
         ]
         self.loaded_tools['news'] = tools
-        logger.info("tool_loaded", tool="Announcements NoAuth (RSS)")
+        logger.info("tool_loaded", tool="Announcements NoAuth")
         logger.info("tool_loaded", tool="NewsAPI")
         logger.info("tool_loaded", tool="GNews")
-        logger.info("tool_loaded", tool="Official RSS Announcements")
-        logger.info("tool_loaded", tool="PR Wire RSS")
+        logger.info("tool_loaded", tool="Official News Pages")
         logger.info("tool_loaded", tool="Multi-Engine Web Search")
         logger.info("tool_loaded", tool="Curated AI Sources Catalog")
         logger.info("tool_loaded", tool="Curated AI Sources Search")

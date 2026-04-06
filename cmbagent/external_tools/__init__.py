@@ -51,8 +51,7 @@ from .news_tools import (
     newsapi_search,
     gnews_search,
     multi_engine_web_search,
-    rss_company_announcements,
-    prwire_search,
+    scrape_official_news_pages,
     verify_url,
     verify_reference_links,
 )
@@ -101,8 +100,7 @@ __all__ = [
     'newsapi_search',
     'gnews_search',
     'multi_engine_web_search',
-    'rss_company_announcements',
-    'prwire_search',
+    'scrape_official_news_pages',
     'verify_url',
     'verify_reference_links',
 ]

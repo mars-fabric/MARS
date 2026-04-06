@@ -58,6 +58,7 @@ Starting from an RFP document, the system outputs:
 | **Progressive context** | Each stage builds on all previous stages (cumulative shared state) |
 | **Real-time feedback** | WebSocket streaming + REST polling deliver live console output during execution |
 | **Resumable** | Tasks persist in a database and can be resumed after page reloads or interruptions |
+| **Auto-completing** | `WorkflowRun.status` transitions to `"completed"` automatically when all 7 stages finish |
 | **Cost-transparent** | Per-LLM-call cost tracking is aggregated and displayed throughout the workflow |
 | **Editable at every stage** | Split-view editor (60% preview + 40% refinement chat) |
 | **Token-safe** | Every LLM call has dynamic `max_completion_tokens` capping and automatic prompt chunking (0.75 safety margin) |
@@ -169,9 +170,13 @@ User clicks "RFP Proposal Generator" in TaskList.tsx
   │
   └── RfpProposalTask.tsx renders the 8-step wizard
        │
-       ├── Step 0: RfpSetupPanel.tsx
+       ├── Step 0: In-progress section (above) + RfpSetupPanel.tsx
+       │     ├── In-progress cards: fetches GET /api/rfp/recent on mount
+       │     │     └── Click card → resumeTask(id) → jumps to latest step
        │     ├── User uploads PDF → pdf_extractor.py extracts text → auto-fills textarea
        │     ├── User enters/edits RFP content + additional context
+       │     ├── Model settings (collapsible gear icon, uses useModelConfig())
+       │     │     └── LLM Model dropdown (centralized from /api/models/config)
        │     └── Clicks "Analyze Requirements"
        │
        └── hook.createTask(text, context, stageConfig)    [useRfpTask.ts]
@@ -184,7 +189,7 @@ User clicks "RFP Proposal Generator" in TaskList.tsx
                          └── Return task_id, work_dir, stages[]
 ```
 
-### 3.2 Stage Execution (Phase-Based Generate → Review)
+### 3.2 Stage Execution (Phase-Based Generate → Specialist → Review)
 
 ```
 hook.executeStage(N, taskId)                              [useRfpTask.ts]
@@ -208,7 +213,12 @@ hook.executeStage(N, taskId)                              [useRfpTask.ts]
         │     │   user   = phase.build_user_prompt(ctx) (RFP + prior stages)
         │     │   → draft content
         │     │
-        │     └── REVIEW PASS (LLM call 2):
+        │     ├── SPECIALIST PASS (LLM call 2, if multi_agent=True):
+        │     │   system = specialist persona (from agent_teams.py)
+        │     │   user   = draft + specialist instructions
+        │     │   → specialist-improved content
+        │     │
+        │     └── REVIEW PASS (LLM call 3):
         │         system = phase.review_system_prompt  (13-point checklist)
         │         user   = "Draft document:\n\n{draft}"
         │         → improved content
@@ -259,6 +269,7 @@ Stage 7 RfpProposalPhase receives ALL 6 prior stages' content
   │   ├── For each group: _build_partial_prompt() → _single_generate()
   │   └── Accumulation pass: merge partials into one document (zero data loss)
   │
+  ├── Specialist pass: chunk_prompt_if_needed() + dynamic cap → domain expert review
   ├── Review pass: chunk_prompt_if_needed() + dynamic cap → enterprise polish
   └── Saves final proposal.md
        │
@@ -284,12 +295,23 @@ Console output is captured via `_ConsoleCapture` — a thread-safe class that in
 
 Tasks are fully persistent and can be resumed:
 
-1. `GET /api/rfp/recent` lists incomplete tasks (status="executing")
+1. `GET /api/rfp/recent` lists incomplete tasks (status="executing", progress < 100%)
 2. User selects a task → `GET /api/rfp/{id}` loads full state
 3. UI reconstructs the wizard position:
    - Running stage → reconnect WebSocket + resume console polling
    - Completed stage → show content in editor (editable)
    - Pending/failed stage → stop at that step (user can retry)
+
+**In Progress layout:** When on Step 0, the RFP component fetches `GET /api/rfp/recent` on mount and displays in-progress task cards **above the setup panel** (inside the same page view). Each card shows the task name, current stage, progress bar, and resume/delete actions. The currently active task is filtered out of the list. Both the in-progress cards and the setup form are always visible together — not a separate landing page.
+
+### 3.7 Workflow Run Auto-Completion
+
+When the final stage of an RFP task completes, `_run_rfp_stage()` automatically checks whether all `TaskStage` rows have `status == "completed"`. If so, it transitions the parent `WorkflowRun`:
+
+- `status` → `"completed"`
+- `completed_at` → current UTC timestamp
+
+This prevents finished tasks from appearing in the `GET /api/rfp/recent` endpoint (which only returns `status="executing"` runs), ensuring the "In Progress" section accurately reflects only genuinely active work.
 
 ---
 
@@ -652,7 +674,9 @@ All endpoints prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | POST | `/{id}/stages/{N}/refine` | LLM refinement of content |
 | GET | `/{id}/stages/{N}/console` | Console output lines (polling) |
 | POST | `/{id}/reset-from/{N}` | Reset stage N+ to pending, delete files |
+| POST | `/{id}/stop` | Cancel running stage, mark task as failed |
 | GET | `/{id}/download/{filename}` | Download artifact (validated filename) |
+| GET | `/{id}/download-pdf` | Generate + download proposal as PDF |
 | DELETE | `/{id}` | Delete task + `shutil.rmtree(work_dir)` |
 | WS | `/ws/rfp/{id}/{N}` | Real-time console + completion events |
 
@@ -660,7 +684,23 @@ All endpoints prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 
 ## 8. Configuration & Model Defaults
 
-### 8.1 Phase Model Defaults (RfpPhaseConfig)
+### 8.1 UI Model Settings
+
+The RFP setup panel includes an optional **Model Settings** toggle (gear icon) that allows users to override the default LLM model before starting the proposal. This uses the centralized `useModelConfig` hook which fetches available models from `/api/models/config` (falls back to a static list if the API is unavailable).
+
+**Component:** `RfpStageAdvancedSettings.tsx` in `mars-ui/components/rfp/`
+
+The selected model override is passed as `config_overrides.model` in the execute request for **every stage** (all 7 stages use the same user-selected model).
+
+**Model Selection Flow — UI to Backend:**
+
+1. **UI:** `RfpSetupPanel` renders `RfpStageAdvancedSettings` with a single "LLM Model" dropdown populated by `useModelConfig()`.
+2. **Hook:** `useRfpTask.executeStage()` reads `taskConfig.model` and sets `config_overrides.model` if a model was selected. `taskConfig` is correctly listed in the `useCallback` dependency array, so model changes are always reflected.
+3. **API:** `POST /api/rfp/{id}/stages/{N}/execute` accepts `{ config_overrides }`.
+4. **Backend:** `_run_rfp_stage()` extracts `model = config_overrides.get("model", _get_default_rfp_model())`, applies it to the phase config.
+5. **Phase execution:** The phase is instantiated with `RfpPhaseConfig(model=model, n_reviews=n_reviews)`.
+
+### 8.2 Phase Model Defaults (RfpPhaseConfig)
 
 | Parameter | Default | Notes |
 |---|---|---|
@@ -672,7 +712,7 @@ All endpoints prefixed with `/api/rfp/`. Source: `backend/routers/rfp.py`.
 | `multi_agent` | `True` | Enable 3-agent pipeline (primary → specialist → reviewer). Set `False` for 2-pass generate→review. |
 | `specialist_model` | `None` (per-stage) | Override specialist model; defaults from `get_phase_models()` |
 
-### 8.2 Dynamic Model Resolution
+### 8.3 Dynamic Model Resolution
 
 All stages resolve their model dynamically from `WorkflowConfig.default_llm_model` — **no model names are hardcoded**.
 
@@ -687,7 +727,7 @@ All 7 stages × all 3 agents (primary, specialist, reviewer) use the **same conf
 > **Azure deployment:** Ensure `AZURE_OPENAI_DEPLOYMENT` is set to your deployment name.
 > Set `CMBAGENT_DEFAULT_MODEL` environment variable or update `WorkflowConfig` to change the model for all stages.
 
-### 8.3 Model Override
+### 8.4 Model Override
 
 Override the model per stage via `config_overrides` in the execute request:
 
@@ -700,22 +740,24 @@ Override the model per stage via `config_overrides` in the execute request:
 }
 ```
 
-### 8.4 Available Models
+### 8.5 Available Models (11 entries, 10 unique)
 
 | Model | Best For |
 |---|---|
-| `gpt-4o` | Good balance of speed, quality, and availability |
+| `gpt-4o` | Good balance of speed, quality, and availability (**duplicated** in frontend dropdown) |
+| `gpt-5.3` | Best reasoning and largest output window |
 | `gpt-4.1` | Strong analytical and writing quality |
 | `gpt-4.1-mini` | Cost-effective with 1M context window |
 | `gpt-4o-mini` | Faster and cheaper — good for iteration |
-| `gpt-5.3` | Best reasoning and largest output window |
 | `o3-mini` | Reasoning-focused tasks (does not support `temperature`) |
+| `gemini-2.5-pro` | Strong long-context reasoning (requires Gemini API key) |
 | `gemini-2.5-flash` | Cost-effective for long outputs (requires Gemini API key) |
-| `claude-sonnet-4` | Alternative provider (requires Anthropic API key) |
+| `claude-sonnet-4` | High-quality alternative (requires Anthropic API key) |
+| `claude-3.5-sonnet` | Alternative provider (requires Anthropic API key) |
 
 > **Note:** The default model is resolved from `WorkflowConfig.default_llm_model`. All models in this table are supported and can be set globally or per-stage.
 
-### 8.5 Required Environment Variables
+### 8.6 Required Environment Variables
 
 | Variable | Required? | Used By |
 |---|---|---|
@@ -723,7 +765,7 @@ Override the model per stage via `config_overrides` in the execute request:
 | `ANTHROPIC_API_KEY` | Optional | If using Anthropic models via override |
 | `GOOGLE_API_KEY` | Optional | If using Gemini models via override |
 
-### 8.6 Server Configuration
+### 8.7 Server Configuration
 
 | Setting | Value |
 |---|---|
@@ -732,7 +774,7 @@ Override the model per stage via `config_overrides` in the execute request:
 | **API Docs** | `http://localhost:8000/docs` |
 | **WebSocket** | `ws://localhost:8000/ws/rfp/{id}/{N}` |
 
-### 8.7 Supported Upload File Types
+### 8.8 Supported Upload File Types
 
 `.pdf`, `.docx`, `.doc`, `.txt`, `.md`, `.csv`, `.json`, `.xml`, `.html`
 
@@ -889,7 +931,8 @@ This section provides an exhaustive trace of every class, function, database mod
 │    │                          → PhaseContext(task, shared_state)     │
 │    │                          → await phase.execute(ctx)            │
 │    │                            ├── generation pass (LLM call 1)    │
-│    │                            └── review pass (LLM call 2)        │
+│    │                            ├── specialist pass (LLM call 2)    │
+│    │                            └── review pass (LLM call 3)        │
 │    │                          → CostRepository.record_cost()        │
 │    │                          → TaskStageRepository.update_status()  │
 │    │                          → write .md file to disk               │
@@ -902,7 +945,7 @@ This section provides an exhaustive trace of every class, function, database mod
 │         → polls _console_buffers → sends stage_completed/failed     │
 │                                                                     │
 │  cmbagent/phases/rfp/base.py — RfpPhaseBase                        │
-│    └── execute(ctx) → generation pass + review pass(es)             │
+│    └── execute(ctx) → generation pass + specialist pass + review pass(es)│
 │         ├── create_openai_client() → OpenAI | AzureOpenAI           │
 │         ├── resolve_model_for_provider() → deployment name          │
 │         ├── _gen() → client.chat.completions.create(...)            │
@@ -1011,7 +1054,7 @@ This section provides an exhaustive trace of every class, function, database mod
 | **`RfpTaskState`** | `types/rfp.ts` | TypeScript type for task state |
 | **`RfpWizardStep`** | `types/rfp.ts` | Union type: `0 \| 1 \| 2 \| ... \| 7` |
 | **`RFP_STEP_LABELS`** | `types/rfp.ts` | Human labels: Setup, Requirements, Tools & Tech, … |
-| **`RFP_AVAILABLE_MODELS`** | `types/rfp.ts` | 9 model options for stage config |
+| **`RFP_AVAILABLE_MODELS`** | `types/rfp.ts` | 11 entries (10 unique models — `gpt-4o` duplicated) for stage config |
 
 ---
 
@@ -1247,16 +1290,21 @@ If no `---` boundaries exist, the prompt is returned as a single-element list so
 
 ### 12.5 Protected Call Sites
 
+All **11 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are protected:
+
 | # | Call Site | File | Protection |
 |---|-----------|------|------------|
 | 1 | Generation (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic cap |
 | 2 | Generation (chunked) | `base.py` | Per-chunk dynamic cap |
-| 3 | Review (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic cap |
-| 4 | Review (chunked) | `base.py` | Per-chunk dynamic cap |
-| 5 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic cap via `get_model_limits` |
-| 6 | Stage 7 review (single) | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
-| 7 | Stage 7 review (chunked) | `proposal_phase.py` | Per-chunk dynamic cap |
-| 8 | Refinement chat | `rfp.py` | Dynamic cap + content trimming (start+end) |
+| 3 | Specialist (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic cap |
+| 4 | Specialist (chunked) | `base.py` | Per-chunk dynamic cap |
+| 5 | Review (single-shot) | `base.py` | `chunk_prompt_if_needed` + dynamic cap |
+| 6 | Review (chunked) | `base.py` | Per-chunk dynamic cap |
+| 7 | Stage 7 `_single_generate` | `proposal_phase.py` | Dynamic cap via `get_model_limits` |
+| 8 | Stage 7 specialist | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
+| 9 | Stage 7 review (single) | `proposal_phase.py` | `chunk_prompt_if_needed` + dynamic cap |
+| 10 | Stage 7 review (chunked) | `proposal_phase.py` | Per-chunk dynamic cap |
+| 11 | Refinement chat | `rfp.py` | Dynamic cap + content trimming (start+end) |
 
 ### 12.6 Key Functions (`token_utils.py`)
 

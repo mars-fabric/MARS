@@ -1,7 +1,8 @@
 """News and announcement retrieval tools for AI Weekly workflows.
 
 These tools focus on structured press/company announcement collection with
-strong date filtering and deterministic official-source RSS coverage.
+strong date filtering, direct page scraping, RSS feeds for blocked sites,
+and web-search fallback.
 """
 
 from __future__ import annotations
@@ -17,7 +18,6 @@ from typing import Dict, List, Optional
 from urllib.parse import urlencode, urlparse, parse_qs, unquote
 from urllib.request import Request, urlopen
 
-import feedparser
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -43,59 +43,262 @@ _NOISE_KEYWORDS = {
 }
 
 
-_DEFAULT_RSS_FEEDS: Dict[str, List[str]] = {
-    "openai": ["https://openai.com/news/rss.xml"],
-    "google": ["https://blog.google/rss/"],
-    "microsoft": ["https://blogs.microsoft.com/feed/"],
-    "meta": ["https://ai.meta.com/blog/rss/"],
-    "facebook": ["https://about.fb.com/news/feed/"],
-    "anthropic": ["https://www.anthropic.com/news/rss.xml"],
-    "nvidia": ["https://nvidianews.nvidia.com/releases?pagetemplate=rss"],
-    "amazon": ["https://www.aboutamazon.com/news/rss"],
-    "aws": ["https://aws.amazon.com/blogs/aws/feed/"],
-    "oracle": ["https://www.oracle.com/news/rss/"],
-    "cisco": ["https://newsroom.cisco.com/c/r/newsroom/en/us/rss-feeds.html"],
-    "uber": ["https://www.uber.com/newsroom/rss/"],
-    "ibm": ["https://newsroom.ibm.com/rss"],
-    "intel": ["https://newsroom.intel.com/feed/"],
-    "amd": ["https://ir.amd.com/rss/news-releases.xml"],
-    "qualcomm": ["https://www.qualcomm.com/news/releases/feed"],
-    "samsung": ["https://news.samsung.com/global/feed"],
-    "salesforce": ["https://www.salesforce.com/news/feed/"],
-    "sap": ["https://news.sap.com/feed/"],
-    "siemens": ["https://press.siemens.com/global/en/rss.xml"],
-    "tencent": ["https://www.tencent.com/en-us/articles.rss"],
-    "alibaba": ["https://www.alibabagroup.com/en-US/news/rss"],
-    "baidu": ["https://ir.baidu.com/rss"],
-    "sony": ["https://www.sony.com/en/pressrelease/rss"],
-    "prnewswire": ["https://www.prnewswire.com/rss/news-releases-list.rss"],
-    "huggingface": ["https://huggingface.co/blog/feed.xml"],
-    "mit": ["https://news.mit.edu/topic/artificial-intelligence2/rss.xml"],
-    "stanford": ["https://hai.stanford.edu/news/rss.xml"],
-    "cmu": ["https://www.cs.cmu.edu/news/feed"],
-    "berkeley": ["https://bair.berkeley.edu/blog/feed.xml"],
-    "deepmind": ["https://deepmind.google/blog/rss.xml"],
-    "arxiv": ["https://rss.arxiv.org/rss/cs.AI", "https://rss.arxiv.org/rss/cs.LG"],
+_CURATED_AI_NEWS_SOURCES: List[Dict[str, str]] = [
+    # ── AI / ML / Foundation Models (primary, authoritative) ──
+    {"name": "OpenAI Blog", "url": "https://openai.com/blog"},
+    {"name": "Google AI Blog", "url": "https://ai.googleblog.com"},
+    {"name": "Google Cloud AI Blog", "url": "https://cloud.google.com/blog/products/ai-machine-learning"},
+    {"name": "Google Research Blog", "url": "https://research.google/blog"},
+    {"name": "DeepMind Blog", "url": "https://deepmind.google/discover/blog"},
+    {"name": "Microsoft AI Blog", "url": "https://www.microsoft.com/en-us/ai/blog"},
+    {"name": "Microsoft Research Blog", "url": "https://www.microsoft.com/en-us/research/blog"},
+    {"name": "Azure AI Blog", "url": "https://azure.microsoft.com/en-us/blog"},
+    {"name": "Anthropic News", "url": "https://www.anthropic.com/news"},
+    {"name": "Meta AI Blog", "url": "https://ai.meta.com/blog"},
+    {"name": "Meta Engineering Blog", "url": "https://engineering.fb.com"},
+    {"name": "AWS ML Blog", "url": "https://aws.amazon.com/blogs/machine-learning"},
+    {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog"},
+    # ── Hardware & Compute ──
+    {"name": "NVIDIA Blog", "url": "https://blogs.nvidia.com"},
+    {"name": "NVIDIA Developer Blog", "url": "https://developer.nvidia.com/blog"},
+    {"name": "Intel AI", "url": "https://www.intel.com/content/www/us/en/artificial-intelligence/posts.html"},
+    {"name": "AMD AI Blog", "url": "https://www.amd.com/en/blogs"},
+    # ── Robotics ──
+    {"name": "Boston Dynamics Blog", "url": "https://www.bostondynamics.com/blog"},
+    {"name": "IEEE Robotics", "url": "https://spectrum.ieee.org/robotics"},
+    # ── Quantum Computing ──
+    {"name": "Google Quantum AI", "url": "https://quantumai.google"},
+    {"name": "IBM Quantum", "url": "https://research.ibm.com/quantum"},
+    {"name": "Microsoft Quantum", "url": "https://azure.microsoft.com/en-us/products/quantum"},
+    {"name": "Quantinuum News", "url": "https://www.quantinuum.com/news"},
+
+    # ── Cloud & Enterprise AI ──
+    {"name": "Oracle AI Blog", "url": "https://blogs.oracle.com/ai-and-datascience"},
+    {"name": "Oracle Cloud Blog", "url": "https://blogs.oracle.com/cloud-infrastructure"},
+    # ── AI news dashboards ──
+    {"name": "AI News", "url": "https://artificialintelligence-news.com"}
+]
+
+
+# Official news/blog pages for major AI companies — used for web-search
+# fallback when RSS feeds return zero items for a company.
+_OFFICIAL_NEWS_PAGES: Dict[str, List[str]] = {
+    # ── AI / ML / Foundation Models ──
+    "openai": [
+        "https://openai.com/blog",
+        "https://openai.com/news/",
+        "https://openai.com/index/",
+    ],
+    "google": [
+        "https://ai.googleblog.com",
+        "https://blog.google/technology/ai/",
+        "https://cloud.google.com/blog/products/ai-machine-learning",
+        "https://research.google/blog/",
+    ],
+    "deepmind": [
+        "https://deepmind.google/discover/blog/",
+    ],
+    "microsoft": [
+        "https://www.microsoft.com/en-us/ai/blog",
+        "https://blogs.microsoft.com/ai/",
+        "https://azure.microsoft.com/en-us/blog/",
+        "https://www.microsoft.com/en-us/research/blog/",
+    ],
+    "anthropic": [
+        "https://www.anthropic.com/news",
+        "https://www.anthropic.com/research",
+        "https://www.anthropic.com/engineering",
+        "https://www.anthropic.com/customers",
+    ],
+    "meta": [
+        "https://ai.meta.com/blog/",
+        "https://about.fb.com/news/",
+        "https://engineering.fb.com/",
+        "https://ai.meta.com/research/",
+    ],
+    "amazon": [
+        "https://aws.amazon.com/blogs/machine-learning/",
+        "https://www.aboutamazon.com/news/aws",
+    ],
+    "huggingface": [
+        "https://huggingface.co/blog",
+    ],
+    # ── Hardware & Compute ──
+    "nvidia": [
+        "https://blogs.nvidia.com",
+        "https://nvidianews.nvidia.com/",
+        "https://developer.nvidia.com/blog",
+    ],
+    "intel": [
+        "https://www.intel.com/content/www/us/en/artificial-intelligence/posts.html",
+        "https://newsroom.intel.com/",
+    ],
+    "amd": [
+        "https://www.amd.com/en/blogs",
+    ],
+    "apple": [
+        "https://machinelearning.apple.com/",
+        "https://www.apple.com/newsroom/",
+    ],
+    # ── Robotics ──
+    "bostondynamics": [
+        "https://www.bostondynamics.com/blog",
+    ],
+    # ── Quantum Computing ──
+    "google_quantum": [
+        "https://quantumai.google",
+    ],
+    "ibm": [
+        "https://research.ibm.com/quantum",
+        "https://newsroom.ibm.com/artificial-intelligence",
+        "https://research.ibm.com/blog",
+    ],
+    "quantinuum": [
+        "https://www.quantinuum.com/news",
+    ],
+    # ── Cloud & Enterprise AI ──
+    "oracle": [
+        "https://blogs.oracle.com/ai-and-datascience/",
+        "https://blogs.oracle.com/cloud-infrastructure/",
+        "https://www.oracle.com/news/",
+    ],
+    # ── Other tech companies ──
+    "samsung": [
+        "https://news.samsung.com/global/",
+        "https://research.samsung.com/blog",
+    ],
+    "salesforce": [
+        "https://www.salesforce.com/news/",
+        "https://blog.salesforceairesearch.com/",
+    ],
 }
 
-_CURATED_AI_NEWS_SOURCES: List[Dict[str, str]] = [
-    {"name": "Axios AI", "url": "https://www.axios.com/technology/axios-ai"},
-    {"name": "The Batch", "url": "https://www.deeplearning.ai/the-batch"},
-    {"name": "Last Week in AI", "url": "https://lastweekin.ai"},
-    {"name": "Google AI Blog", "url": "http://blog.google/technology/ai"},
-    {"name": "Anthropic News", "url": "https://www.anthropic.com/news"},
-    {"name": "Hugging Face Blog", "url": "https://huggingface.co/blog"},
-    {"name": "The Rundown AI", "url": "https://www.therundown.ai"},
-    {"name": "MIT AI News", "url": "https://news.mit.edu/topic/artificial-intelligence2"},
-    {"name": "Stanford HAI", "url": "https://hai.stanford.edu/news"},
-    {"name": "Berkeley AI Research", "url": "https://bair.berkeley.edu/blog"},
-    {"name": "DeepMind Blog", "url": "https://deepmind.google/blog"},
-    {"name": "CMU Machine Learning", "url": "https://www.cs.cmu.edu/news"},
-    {"name": "VentureBeat AI", "url": "https://venturebeat.com/category/ai"},
-    {"name": "TechCrunch AI", "url": "https://techcrunch.com/category/artificial-intelligence"},
-    {"name": "The Verge AI", "url": "https://www.theverge.com/ai-artificial-intelligence"},
-    {"name": "Ars Technica AI", "url": "https://arstechnica.com/ai"},
-]
+
+# RSS/Atom feeds for companies whose websites block direct scraping.
+# These are official first-party feeds maintained by the companies themselves.
+_COMPANY_RSS_FEEDS: Dict[str, List[str]] = {
+    "openai": [
+        # OpenAI blocks both direct scraping and RSS; rely on web-search fallback
+    ],
+    "google": [
+        "https://blog.google/technology/ai/rss/",
+        "https://research.google/feeds/blog.xml",
+    ],
+    "deepmind": [
+        "https://deepmind.google/blog/rss.xml",
+    ],
+    "microsoft": [
+        "https://blogs.microsoft.com/feed/",
+        "https://www.microsoft.com/en-us/research/feed/",
+        "https://azure.microsoft.com/en-us/blog/feed/",
+    ],
+    "meta": [
+        "https://engineering.fb.com/feed/",
+        "https://ai.meta.com/blog/rss/",
+    ],
+    "nvidia": [
+        "https://blogs.nvidia.com/feed/",
+        "https://developer.nvidia.com/blog/feed/",
+    ],
+    "amazon": [
+        "https://aws.amazon.com/blogs/machine-learning/feed/",
+    ],
+    "apple": [
+        "https://machinelearning.apple.com/rss.xml",
+    ],
+    "ibm": [
+        "https://research.ibm.com/blog/rss",
+    ],
+    "oracle": [
+        "https://blogs.oracle.com/ai-and-datascience/rss",
+        "https://blogs.oracle.com/cloud-infrastructure/rss",
+    ],
+    "anthropic": [
+        "https://www.anthropic.com/rss/news",
+    ],
+    "bostondynamics": [
+        "https://www.bostondynamics.com/blog/feed",
+    ],
+}
+
+
+def _fetch_rss_items(feed_url: str, company: str, from_date: str = "", to_date: str = "") -> List[Dict]:
+    """Fetch and parse an RSS/Atom feed, returning normalised item dicts.
+
+    Uses feedparser if available, otherwise falls back to basic XML regex parsing.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; MARSBot/1.0)",
+        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml",
+    }
+    xml = _safe_get_text(feed_url, headers=headers)
+    if not xml or len(xml) < 100:
+        return []
+
+    items: List[Dict] = []
+
+    # Try feedparser first (best quality)
+    try:
+        import feedparser
+        feed = feedparser.parse(xml)
+        for entry in (feed.entries or []):
+            title = (entry.get("title") or "").strip()
+            link = (entry.get("link") or "").strip()
+            if not title or not link:
+                continue
+            # Parse publication date
+            pub_str = entry.get("published") or entry.get("updated") or ""
+            pub_dt = _parse_pub_datetime(pub_str)
+            if not _in_range(pub_dt, from_date, to_date):
+                continue
+            items.append({
+                "title": title,
+                "url": link,
+                "source": company,
+                "published_at": pub_dt.isoformat() if pub_dt else None,
+                "summary": (entry.get("summary") or "")[:300].strip(),
+                "engine": "rss",
+            })
+        return items
+    except ImportError:
+        pass
+
+    # Fallback: basic regex XML parsing (no feedparser)
+    # Works for most RSS 2.0 feeds
+    item_blocks = re.findall(r"<item[^>]*>(.*?)</item>", xml, re.S | re.I)
+    if not item_blocks:
+        # Try Atom format
+        item_blocks = re.findall(r"<entry[^>]*>(.*?)</entry>", xml, re.S | re.I)
+
+    for block in item_blocks:
+        title_m = re.search(r"<title[^>]*>(.*?)</title>", block, re.S | re.I)
+        link_m = re.search(r"<link[^>]*href=[\"']([^\"']+)[\"']", block, re.I) or \
+                 re.search(r"<link[^>]*>(.*?)</link>", block, re.S | re.I)
+        pub_m = re.search(r"<(?:pubDate|published|updated)[^>]*>(.*?)</(?:pubDate|published|updated)>",
+                          block, re.S | re.I)
+
+        title = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", (title_m.group(1) if title_m else "")).strip()
+        link = ""
+        if link_m:
+            link = link_m.group(1).strip()
+        if not title or not link or not link.startswith("http"):
+            continue
+
+        pub_str = re.sub(r"<!\[CDATA\[(.*?)\]\]>", r"\1", (pub_m.group(1) if pub_m else "")).strip()
+        pub_dt = _parse_pub_datetime(pub_str)
+        if from_date and not _in_range(pub_dt, from_date, to_date):
+            continue
+
+        items.append({
+            "title": unescape(title),
+            "url": link,
+            "source": company,
+            "published_at": pub_dt.isoformat() if pub_dt else None,
+            "summary": "",
+            "engine": "rss",
+        })
+
+    return items
 
 
 def _parse_iso_date(value: str) -> Optional[datetime]:
@@ -599,102 +802,6 @@ def gnews_search(
     }
 
 
-def rss_company_announcements(
-    company: str = "",
-    from_date: str = "",
-    to_date: str = "",
-    limit: int = 50,
-) -> Dict:
-    """Collect official company/newsroom announcements from curated RSS feeds."""
-    key = company.strip().lower()
-    selected: Dict[str, List[str]]
-
-    if key:
-        urls = _DEFAULT_RSS_FEEDS.get(key)
-        if not urls:
-            return {
-                "error": f"Unknown company '{company}'. Supported: {', '.join(sorted(_DEFAULT_RSS_FEEDS.keys()))}",
-                "items": [],
-            }
-        selected = {key: urls}
-    else:
-        selected = _DEFAULT_RSS_FEEDS
-
-    items: List[Dict] = []
-    dedupe = set()
-
-    for source_name, urls in selected.items():
-        for feed_url in urls:
-            parsed = feedparser.parse(feed_url)
-            for entry in parsed.entries:
-                link = (entry.get("link") or "").strip()
-                title = (entry.get("title") or "").strip()
-                published = entry.get("published") or entry.get("updated") or ""
-                pub_dt = _parse_pub_datetime(published)
-
-                if not link or not title or not _in_range(pub_dt, from_date or None, to_date or None):
-                    continue
-
-                dedupe_key = (link.lower(), title.lower())
-                if dedupe_key in dedupe:
-                    continue
-                dedupe.add(dedupe_key)
-
-                items.append(
-                    {
-                        "title": title,
-                        "url": link,
-                        "source": source_name,
-                        "published_at": pub_dt.isoformat() if pub_dt else None,
-                        "summary": (entry.get("summary") or "").strip(),
-                        "feed": feed_url,
-                    }
-                )
-
-    items.sort(key=lambda x: x.get("published_at") or "", reverse=True)
-    return {
-        "provider": "official_rss",
-        "company": key or "all",
-        "count": len(items),
-        "items": items[: max(1, min(limit, 200))],
-    }
-
-
-def prwire_search(query: str, from_date: str = "", to_date: str = "", limit: int = 50) -> Dict:
-    """Search PR wire announcements using curated PR Newswire RSS feed.
-
-    This keeps integration deterministic without requiring proprietary paid SDKs.
-    """
-    base_items = rss_company_announcements(company="prnewswire", from_date=from_date, to_date=to_date, limit=200)
-    items = base_items.get("items") or []
-
-    # PR feeds can contain large amounts of finance/legal noise; keep AI-relevant items.
-    items = [item for item in items if _is_ai_relevant(item)]
-
-    q = query.strip()
-    if q:
-        items = [
-            item for item in items
-            if _query_matches_text(f"{item.get('title', '')} {item.get('summary', '')}", q)
-        ]
-
-    deduped: List[Dict] = []
-    seen_keys = set()
-    for item in items:
-        key = _canonical_item_key(item)
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        deduped.append(item)
-
-    return {
-        "provider": "prwire_rss",
-        "query": query,
-        "count": len(deduped),
-        "items": deduped[: max(1, min(limit, 200))],
-    }
-
-
 def announcements_noauth(
     query: str = "",
     company: str = "",
@@ -705,24 +812,21 @@ def announcements_noauth(
     """Keyless press/company announcement retrieval.
 
     Uses only free, no-auth sources:
-    1) Official company newsroom/blog RSS feeds
-    2) PR Newswire RSS feed
+    1) Official company news/blog pages (web-search based)
+    2) Curated AI news sources
     """
-    rss_result = rss_company_announcements(
+    # Scrape official news pages for the company (or all companies)
+    official_result = scrape_official_news_pages(
         company=company,
         from_date=from_date,
         to_date=to_date,
         limit=200,
     )
-
-    rss_items = rss_result.get("items") or []
-    # Pass query through so PR filtering can leverage user intent and avoid generic noise.
-    pr_result = prwire_search(query=query, from_date=from_date, to_date=to_date, limit=200)
-    pr_items = pr_result.get("items") or []
+    official_items = official_result.get("items") or []
 
     merged: List[Dict] = []
     seen = set()
-    for item in rss_items + pr_items:
+    for item in official_items:
         key = _canonical_item_key(item)
         if key in seen:
             continue
@@ -744,6 +848,276 @@ def announcements_noauth(
         "company": company or "all",
         "count": len(merged),
         "items": merged[: max(1, min(limit, 300))],
+    }
+
+
+def _direct_scrape_page_links(page_url: str, company: str) -> List[Dict]:
+    """Fetch an official news/blog page directly and extract article links.
+
+    This bypasses search engines entirely — it fetches the HTML of the company
+    news page and pulls out <a href> links that look like individual articles.
+    Aggressively filters navigation links to avoid polluting results.
+    """
+    headers = {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
+    html = _safe_get_text(page_url, headers=headers)
+    if not html or len(html) < 500:
+        return []
+
+    parsed_base = urlparse(page_url)
+    base_domain = parsed_base.netloc.lower().replace("www.", "")
+
+    # Extract all anchor links
+    link_pattern = re.compile(
+        r'<a[^>]*\bhref=["\']([^"\'#]+)["\'][^>]*>(.*?)</a>', re.I | re.S
+    )
+    items: List[Dict] = []
+    seen_urls: set = set()
+
+    # Patterns that indicate a navigation/product link (not an article)
+    _NAV_SKIP_PATTERNS = [
+        r"^/$", r"/category/", r"/tag/", r"/page/\d", r"/author/",
+        r"/search", r"/login", r"/signup", r"/contact", r"/about$",
+        r"/privacy", r"/terms", r"/sitemap", r"\.(css|js|png|jpg|svg|ico)$",
+        r"/store/", r"/shop/", r"/pricing", r"/download", r"/install",
+        r"/products?/", r"/solutions/", r"/services/", r"/support/",
+        r"/careers", r"/jobs", r"/legal", r"/compliance",
+        r"/account", r"/settings", r"/profile", r"/dashboard",
+    ]
+    # Patterns that indicate an article URL
+    _ARTICLE_PATH_SIGNALS = [
+        r"/blog/", r"/news/", r"/research/", r"/index/", r"/post/",
+        r"/article/", r"/press-release", r"/announcement",
+        r"/20\d{2}/", r"/20\d{2}-",  # Date in path
+    ]
+    # Generic nav labels to skip
+    _NAV_TITLES = {
+        "read more", "learn more", "see all", "view all", "click here",
+        "more", "next", "previous", "sign in", "sign up", "log in",
+        "create account", "get started", "try free", "contact us",
+        "small business", "microsoft teams", "accessories", "windows",
+        "xbox", "surface", "microsoft 365", "developer tools",
+        "autonomous machines", "cloud & data center", "deep learning & ai",
+        "design & pro visualization", "healthcare", "gaming",
+        "conditions of use", "privacy policy", "cookie policy",
+    }
+
+    for href, title_html in link_pattern.findall(html):
+        href = href.strip()
+        # Resolve relative URLs
+        if href.startswith("/"):
+            href = f"{parsed_base.scheme}://{parsed_base.netloc}{href}"
+        if not href.startswith("http"):
+            continue
+        link_domain = urlparse(href).netloc.lower().replace("www.", "")
+        # Must be same domain (or subdomain)
+        if base_domain not in link_domain and link_domain not in base_domain:
+            continue
+
+        path = urlparse(href).path.lower()
+
+        # Skip obvious navigation/product pages
+        if any(re.search(pat, path) for pat in _NAV_SKIP_PATTERNS):
+            continue
+
+        # Require some path depth (at least /segment/something)
+        path_parts = [p for p in path.split("/") if p]
+        if len(path_parts) < 2:
+            continue
+
+        url_key = href.lower().rstrip("/")
+        if url_key in seen_urls:
+            continue
+        seen_urls.add(url_key)
+
+        title = re.sub(r"<[^>]+>", "", unescape(title_html)).strip()
+        # Collapse whitespace
+        title = re.sub(r"\s+", " ", title).strip()
+
+        # Skip links with no meaningful title text
+        if not title or len(title) < 15 or len(title) > 300:
+            continue
+        # Skip generic navigation text
+        if title.lower().strip() in _NAV_TITLES:
+            continue
+
+        # Prefer links with article path signals — if the page has many links,
+        # only keep those that look like articles
+        has_article_signal = any(re.search(pat, path) for pat in _ARTICLE_PATH_SIGNALS)
+
+        # Try to extract date from URL path (common patterns: /2026/03/ or /2026-03-)
+        pub_date = None
+        date_match = re.search(r"/(20\d{2})[/-](0[1-9]|1[0-2])[/-](\d{2})?", href)
+        if date_match:
+            y, m = date_match.group(1), date_match.group(2)
+            d = date_match.group(3) or "15"
+            try:
+                pub_date = datetime(int(y), int(m), int(d), tzinfo=timezone.utc).isoformat()
+            except ValueError:
+                pass
+            has_article_signal = True  # Date in URL is a strong article signal
+
+        # Only include links with article signals to avoid nav-link pollution
+        if not has_article_signal:
+            continue
+
+        items.append({
+            "title": title,
+            "url": href,
+            "source": company,
+            "published_at": pub_date,
+            "summary": "",
+            "engine": "direct_scrape",
+        })
+
+    return items
+
+
+def scrape_official_news_pages(
+    company: str = "",
+    from_date: str = "",
+    to_date: str = "",
+    limit: int = 20,
+) -> Dict:
+    """Scrape official company news/blog pages for recent AI releases.
+
+    Uses a two-pronged approach:
+    1) Direct HTML scraping of each official page to extract article links
+    2) Fallback to site-scoped web search if direct scraping yields few results
+
+    Args:
+        company: Company key (e.g. "openai"). Empty = all known companies.
+        from_date: YYYY-MM-DD start date.
+        to_date: YYYY-MM-DD end date.
+        limit: Max items to return.
+    """
+    key = company.strip().lower()
+    if key:
+        pages = _OFFICIAL_NEWS_PAGES.get(key)
+        if not pages:
+            return {
+                "error": f"No official pages for '{company}'. "
+                         f"Supported: {', '.join(sorted(_OFFICIAL_NEWS_PAGES.keys()))}",
+                "items": [],
+            }
+        selected = {key: pages}
+    else:
+        selected = _OFFICIAL_NEWS_PAGES
+
+    items: List[Dict] = []
+    seen: set = set()
+    cap = max(1, min(limit, 100))
+
+    for source_name, page_urls in selected.items():
+        if len(items) >= cap:
+            break
+        company_items_before = len(items)
+
+        for page_url in page_urls:
+            if len(items) >= cap:
+                break
+
+            # --- Primary: direct HTML scraping of the page ---
+            try:
+                direct_items = _direct_scrape_page_links(page_url, source_name)
+                for item in direct_items:
+                    item_url = (item.get("url") or "").strip()
+                    url_key = item_url.lower().rstrip("/")
+                    if url_key in seen or not item.get("title"):
+                        continue
+                    # Date filter if we have a date from the URL
+                    pub_at = item.get("published_at")
+                    if pub_at and from_date:
+                        pub_dt = _parse_iso_date(pub_at)
+                        if pub_dt and not _in_range(pub_dt, from_date, to_date):
+                            continue
+                    seen.add(url_key)
+                    items.append(item)
+                    if len(items) >= cap:
+                        break
+            except Exception as e:
+                logger.warning("direct_scrape_failed", company=source_name,
+                               page=page_url, error=str(e))
+
+        # --- Fallback 1: RSS feeds (reliable for sites that block direct scraping) ---
+        company_items_added = len(items) - company_items_before
+        # Count how many items have actual dates (undated items may be stale)
+        dated_items = sum(
+            1 for i in items[company_items_before:]
+            if i.get("published_at")
+        )
+        if (company_items_added < 5 or dated_items < 2) and source_name in _COMPANY_RSS_FEEDS:
+            for feed_url in _COMPANY_RSS_FEEDS[source_name]:
+                if len(items) >= cap:
+                    break
+                try:
+                    rss_items = _fetch_rss_items(feed_url, source_name, from_date, to_date)
+                    for item in rss_items:
+                        url_key = (item.get("url") or "").lower().rstrip("/")
+                        if url_key in seen or not item.get("title"):
+                            continue
+                        seen.add(url_key)
+                        items.append(item)
+                        if len(items) >= cap:
+                            break
+                except Exception as e:
+                    logger.warning("rss_fetch_failed", company=source_name,
+                                   feed=feed_url, error=str(e))
+
+        # --- Fallback 2: web search if still <3 dated items for this company ---
+        company_items_added = len(items) - company_items_before
+        dated_items = sum(
+            1 for i in items[company_items_before:]
+            if i.get("published_at")
+        )
+        if company_items_added < 3 or dated_items < 2:
+            for page_url in page_urls[:1]:  # Only search first URL to avoid rate-limits
+                if len(items) >= cap:
+                    break
+                domain = (urlparse(page_url).netloc or "").lower().replace("www.", "")
+                if not domain:
+                    continue
+                q = f"site:{domain} AI {from_date}" if from_date else f"site:{domain} AI"
+                try:
+                    result = multi_engine_web_search(
+                        q, max_results=5, from_date=from_date, to_date=to_date,
+                    )
+                    for item in result.get("items") or []:
+                        item_url = (item.get("url") or "").strip()
+                        item_domain = (urlparse(item_url).netloc or "").lower()
+                        if domain not in item_domain:
+                            continue
+                        title = (item.get("title") or "").strip()
+                        url_key = item_url.lower().rstrip("/")
+                        if url_key in seen or not title:
+                            continue
+                        seen.add(url_key)
+                        items.append({
+                            "title": title,
+                            "url": item_url,
+                            "source": source_name,
+                            "published_at": None,
+                            "summary": "",
+                            "engine": item.get("engine"),
+                        })
+                        if len(items) >= cap:
+                            break
+                except Exception as e:
+                    logger.warning("official_page_websearch_failed", company=source_name,
+                                   page=page_url, error=str(e))
+
+        # Polite inter-company delay
+        time.sleep(0.5)
+
+    return {
+        "provider": "official_news_pages",
+        "company": key or "all",
+        "count": len(items),
+        "items": items,
     }
 
 

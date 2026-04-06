@@ -24,6 +24,7 @@ from routers.newspulse import router as newspulse_router
 from routers.releasenotes import router as releasenotes_router
 from routers.rfp import router as rfp_router
 from routers.models import router as models_router
+from routers.aiweekly import router as aiweekly_router
 
 
 def register_routers(app):
@@ -46,6 +47,7 @@ def register_routers(app):
     app.include_router(newspulse_router)  # Industry News & Sentiment Pulse
     app.include_router(releasenotes_router)  # Release Notes Generator
     app.include_router(models_router)  # Centralized model configuration
+    app.include_router(aiweekly_router)  # AI Weekly Report (phase-based)
 
 
 __all__ = [
