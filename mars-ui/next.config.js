@@ -9,6 +9,9 @@ const nextConfig = {
   // Disable the "X-Powered-By" header
   poweredByHeader: false,
 
+  // Allow external hosts in development
+  allowedDevOrigins: ['100.88.49.58'],
+
   // Explicitly set turbopack root to avoid conflicts with multiple lockfiles
   turbopack: {
     root: path.resolve(__dirname),
