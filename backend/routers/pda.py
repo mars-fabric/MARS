@@ -228,7 +228,7 @@ async def get_recent_pda_tasks(limit: int = 10):
             .filter(
                 WorkflowRun.mode == "pda",
                 WorkflowRun.parent_run_id.is_(None),
-                WorkflowRun.status.in_(["executing", "draft", "planning", "failed"]),
+                WorkflowRun.status.in_(["executing", "draft", "planning", "failed", "completed"]),
             )
             .order_by(WorkflowRun.started_at.desc())
             .limit(limit)
