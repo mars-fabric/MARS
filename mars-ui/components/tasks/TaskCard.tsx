@@ -1,6 +1,6 @@
 'use client'
 
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { MoreVertical, Play, Copy, Archive } from 'lucide-react'
 import { Badge, Dropdown, IconButton } from '@/components/core'
 
@@ -51,6 +51,13 @@ export default function TaskCard({
   onDuplicate,
   onArchive,
 }: TaskCardProps) {
+  const [formattedLastRun, setFormattedLastRun] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (lastRun) {
+      setFormattedLastRun(formatLastRun(lastRun))
+    }
+  }, [lastRun])
   const dropdownItems = [
     { id: 'open', label: 'Open', icon: <Play className="w-4 h-4" /> },
     { id: 'duplicate', label: 'Duplicate', icon: <Copy className="w-4 h-4" />, disabled: !onDuplicate },
@@ -126,12 +133,12 @@ export default function TaskCard({
           </p>
           <div className="flex items-center gap-3">
             <Badge variant="info" size="sm">{mode}</Badge>
-            {lastRun && (
+            {formattedLastRun && (
               <span
                 className="text-xs"
                 style={{ color: 'var(--mars-color-text-tertiary)' }}
               >
-                Last run: {formatLastRun(lastRun)}
+                Last run: {formattedLastRun}
               </span>
             )}
           </div>
