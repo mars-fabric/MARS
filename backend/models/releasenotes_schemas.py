@@ -64,6 +64,7 @@ class ReleaseNotesStageResponse(BaseModel):
 class ReleaseNotesCreateResponse(BaseModel):
     """Response for POST /api/release-notes/create"""
     task_id: str
+    session_id: str
     work_dir: str
     stages: List[ReleaseNotesStageResponse]
 
@@ -88,6 +89,7 @@ class ReleaseNotesRefineResponse(BaseModel):
 class ReleaseNotesTaskStateResponse(BaseModel):
     """Response for GET /api/release-notes/{task_id} — full task state."""
     task_id: str
+    session_id: Optional[str] = None
     repo_url: str
     repo_name: str
     base_branch: str
@@ -98,3 +100,24 @@ class ReleaseNotesTaskStateResponse(BaseModel):
     stages: List[ReleaseNotesStageResponse]
     current_stage: Optional[int] = None
     progress_percent: float = 0.0
+    total_cost_usd: Optional[float] = None
+
+
+class ReleaseNotesRecentTaskResponse(BaseModel):
+    """Single item in GET /api/release-notes/recent list."""
+    task_id: str
+    repo_name: str
+    base_branch: str
+    head_branch: str
+    status: str
+    created_at: Optional[str] = None
+    current_stage: Optional[int] = None
+    progress_percent: float = 0.0
+
+
+class ReleaseNotesResumeResponse(BaseModel):
+    """Response for POST /api/release-notes/{task_id}/resume"""
+    task_id: str
+    status: str
+    stage_num: Optional[int] = None
+    message: str
