@@ -511,11 +511,13 @@ export function WebSocketProvider({ children }: WebSocketProviderProps) {
           }
         };
 
-        ws.onerror = (error) => {
-          console.error('[WebSocket] Error:', error);
+        ws.onerror = (event) => {
+          // The browser WebSocket error event carries no detail about the cause by
+          // design (security). Log the target URL to make debugging easier.
+          console.error('[WebSocket] Connection failed to', wsUrl, event);
           setLastError('WebSocket connection error');
           setIsConnecting(false);
-          reject(new Error('WebSocket connection error'));
+          reject(new Error(`WebSocket connection failed: ${wsUrl}`));
         };
 
         ws.onclose = (event) => {

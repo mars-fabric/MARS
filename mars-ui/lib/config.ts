@@ -34,10 +34,29 @@ export function getApiUrl(endpoint: string): string {
 }
 
 /**
- * Get the full WebSocket URL for a given endpoint
+ * Get the full WebSocket URL for a given endpoint.
+ * In the browser:
+ *   - If NEXT_PUBLIC_WS_URL is explicitly set, that value is used directly
+ *     (allows pointing straight at the backend for advanced setups).
+ *   - Otherwise the URL is derived from window.location so the connection
+ *     always uses the same host/protocol as the page. Next.js rewrites the
+ *     /ws/:path* path to the backend, identical to how getApiUrl works for
+ *     HTTP requests (no hardcoded host/port, works on any environment).
+ * On the server side, uses the configured WS URL directly.
  */
 export function getWsUrl(endpoint: string): string {
-  const base = config.wsUrl.replace(/\/$/, '');
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+  if (typeof window !== 'undefined') {
+    // Explicit override via env variable (e.g. wss://api.example.com)
+    if (process.env.NEXT_PUBLIC_WS_URL) {
+      const base = process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, '');
+      return `${base}${path}`;
+    }
+    // Default: same-origin path proxied through Next.js (/ws/:path* rewrite)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${path}`;
+  }
+  // Server-side: use the explicit WS URL from config
+  const base = config.wsUrl.replace(/\/$/, '');
   return `${base}${path}`;
 }
