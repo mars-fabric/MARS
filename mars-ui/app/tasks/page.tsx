@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { FileText, ArrowRight, X, TrendingUp, GitBranch } from 'lucide-react'
 import TaskList from '@/components/tasks/TaskList'
-import AIWeeklyTaskEnhanced from '@/components/tasks/AIWeeklyTaskEnhanced'
+import AIWeeklyReportTask from '@/components/tasks/AIWeeklyReportTask'
 import ReleaseNotesTask from '@/components/tasks/ReleaseNotesTask'
 import CodeReviewTask from '@/components/tasks/CodeReviewTask'
 import ProductDiscoveryTask from '@/components/tasks/ProductDiscoveryTask'
@@ -161,7 +161,7 @@ export default function TasksPage() {
 
   // When a task is opened, render its component
   if (activeTask === 'ai-weekly') {
-    return <AIWeeklyTaskEnhanced onBack={handleBack} />
+    return <AIWeeklyReportTask onBack={handleBack} />
   }
   if (activeTask === 'release-notes') {
     return <ReleaseNotesTask onBack={handleBack} resumeTaskId={resumeTaskId} />
