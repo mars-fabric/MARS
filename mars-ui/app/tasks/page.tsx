@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { FileText, ArrowRight, X, TrendingUp, GitBranch } from 'lucide-react'
+import { FileText, ArrowRight, X, TrendingUp, GitBranch, Lightbulb } from 'lucide-react'
 import TaskList from '@/components/tasks/TaskList'
 import AIWeeklyReportTask from '@/components/tasks/AIWeeklyReportTask'
 import ReleaseNotesTask from '@/components/tasks/ReleaseNotesTask'
@@ -43,6 +43,17 @@ interface RecentReleaseNotesTask {
   progress_percent: number
 }
 
+interface RecentPdaTask {
+  task_id: string
+  task: string
+  status: string
+  created_at: string | null
+  current_stage: number | null
+  progress_percent: number
+  client_name?: string | null
+  industry?: string | null
+}
+
 const STAGE_NAMES: Record<number, string> = {
   1: 'Idea Generation',
   2: 'Method Development',
@@ -65,21 +76,33 @@ const RN_STAGE_NAMES: Record<number, string> = {
   5: 'Package',
 }
 
+const PDA_STAGE_NAMES: Record<number, string> = {
+  1: 'Market Research',
+  2: 'Problem Definition',
+  3: 'Opportunities',
+  4: 'Solution Archetypes',
+  5: 'Features',
+  6: 'Builder Prompts',
+  7: 'Slide Content',
+}
+
 export default function TasksPage() {
   const [activeTask, setActiveTask] = useState<ActiveTask>(null)
   const [resumeTaskId, setResumeTaskId] = useState<string | null>(null)
   const [recentTasks, setRecentTasks] = useState<RecentDeepresearchTask[]>([])
   const [recentNpTasks, setRecentNpTasks] = useState<RecentNewsPulseTask[]>([])
   const [recentRnTasks, setRecentRnTasks] = useState<RecentReleaseNotesTask[]>([])
+  const [recentPdaTasks, setRecentPdaTasks] = useState<RecentPdaTask[]>([])
   const [loadingRecent, setLoadingRecent] = useState(false)
 
   const fetchRecentTasks = useCallback(async () => {
     setLoadingRecent(true)
     try {
-      const [drResp, npResp, rnResp] = await Promise.all([
+      const [drResp, npResp, rnResp, pdaResp] = await Promise.all([
         fetch(getApiUrl('/api/deepresearch/recent')),
         fetch(getApiUrl('/api/newspulse/recent')),
         fetch(getApiUrl('/api/release-notes/recent')),
+        fetch(getApiUrl('/api/pda/recent')),
       ])
       if (drResp.ok) {
         const data: RecentDeepresearchTask[] = await drResp.json()
@@ -92,6 +115,10 @@ export default function TasksPage() {
       if (rnResp.ok) {
         const data: RecentReleaseNotesTask[] = await rnResp.json()
         setRecentRnTasks(data)
+      }
+      if (pdaResp.ok) {
+        const data: RecentPdaTask[] = await pdaResp.json()
+        setRecentPdaTasks(data)
       }
     } catch {
       // ignore
@@ -119,6 +146,11 @@ export default function TasksPage() {
   const handleResumeRn = useCallback((taskId: string) => {
     setResumeTaskId(taskId)
     setActiveTask('release-notes')
+  }, [])
+
+  const handleResumePda = useCallback((taskId: string) => {
+    setResumeTaskId(taskId)
+    setActiveTask('product-discovery')
   }, [])
 
   const handleBack = useCallback(() => {
@@ -159,6 +191,17 @@ export default function TasksPage() {
     }
   }, [])
 
+  const handleDeletePdaTask = useCallback(async (taskId: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!confirm('Delete this Product Discovery task? This will remove all data and files.')) return
+    try {
+      await fetch(getApiUrl(`/api/pda/${taskId}`), { method: 'DELETE' })
+      setRecentPdaTasks(prev => prev.filter(t => t.task_id !== taskId))
+    } catch {
+      // ignore — user can retry
+    }
+  }, [])
+
   // When a task is opened, render its component
   if (activeTask === 'ai-weekly') {
     return <AIWeeklyReportTask onBack={handleBack} />
@@ -170,7 +213,7 @@ export default function TasksPage() {
     return <CodeReviewTask onBack={handleBack} />
   }
   if (activeTask === 'product-discovery') {
-    return <ProductDiscoveryTask onBack={handleBack} />
+    return <ProductDiscoveryTask onBack={handleBack} resumeTaskId={resumeTaskId} />
   }
   if (activeTask === 'deepresearch-research') {
     return (
@@ -216,7 +259,7 @@ export default function TasksPage() {
       </div>
 
       {/* In-progress tasks banners */}
-      {!loadingRecent && (recentTasks.length > 0 || recentNpTasks.length > 0 || recentRnTasks.length > 0) && (
+      {!loadingRecent && (recentTasks.length > 0 || recentNpTasks.length > 0 || recentRnTasks.length > 0 || recentPdaTasks.length > 0) && (
         <div className="mb-6 space-y-2">
           <h3
             className="text-xs font-medium uppercase tracking-wider"
@@ -348,6 +391,88 @@ export default function TasksPage() {
                 tabIndex={0}
                 onClick={(e) => handleDeleteNpTask(task.task_id, e)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteNpTask(task.task_id, e as unknown as React.MouseEvent) }}
+                className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
+                title="Delete task"
+              >
+                <X
+                  className="w-3.5 h-3.5"
+                  style={{ color: 'var(--mars-color-text-tertiary)' }}
+                />
+              </div>
+            </button>
+          ))}
+          {/* Product Discovery recent tasks */}
+          {recentPdaTasks.map((task) => (
+            <button
+              key={task.task_id}
+              onClick={() => handleResumePda(task.task_id)}
+              className="w-full flex items-center gap-3 p-3 rounded-mars-md border transition-colors hover:border-[var(--mars-color-primary)]"
+              style={{
+                borderColor: 'var(--mars-color-border)',
+                backgroundColor: 'var(--mars-color-surface)',
+              }}
+            >
+              <div
+                className="flex-shrink-0 w-8 h-8 rounded-mars-md flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #f59e0b, #f97316)' }}
+              >
+                <Lightbulb className="w-4 h-4 text-white" />
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p
+                  className="text-sm font-medium truncate"
+                  style={{ color: 'var(--mars-color-text)' }}
+                >
+                  Product Discovery
+                  {task.client_name ? ` — ${task.client_name}` : task.task ? ` — ${task.task}` : ''}
+                  {task.industry ? ` (${task.industry})` : ''}
+                </p>
+                <p
+                  className="text-xs"
+                  style={{ color: 'var(--mars-color-text-tertiary)' }}
+                >
+                  {task.status === 'completed'
+                    ? 'All stages completed'
+                    : task.status === 'failed'
+                    ? `Stage ${task.current_stage ?? '?'}: ${PDA_STAGE_NAMES[task.current_stage ?? 0] || ''} · Failed`
+                    : task.current_stage
+                    ? `Stage ${task.current_stage}: ${PDA_STAGE_NAMES[task.current_stage] || ''}`
+                    : 'Starting...'}
+                  {' '}&middot;{' '}
+                  {task.status === 'completed' ? '100' : Math.round(task.progress_percent)}% complete
+                </p>
+              </div>
+              <div
+                className="flex-shrink-0 w-20 h-1.5 rounded-full overflow-hidden"
+                style={{ backgroundColor: 'var(--mars-color-surface-overlay)' }}
+              >
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{
+                    width: `${task.status === 'completed' ? 100 : Math.max(5, task.progress_percent)}%`,
+                    background: task.status === 'completed'
+                      ? 'linear-gradient(90deg, #22c55e, #16a34a)'
+                      : task.status === 'failed'
+                      ? 'linear-gradient(90deg, #ef4444, #dc2626)'
+                      : 'linear-gradient(90deg, #f59e0b, #f97316)',
+                  }}
+                />
+              </div>
+              {task.status === 'completed' ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>Done</span>
+              ) : task.status === 'failed' ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>Failed</span>
+              ) : (
+                <ArrowRight
+                  className="w-4 h-4 flex-shrink-0"
+                  style={{ color: 'var(--mars-color-text-tertiary)' }}
+                />
+              )}
+              <div
+                role="button"
+                tabIndex={0}
+                onClick={(e) => handleDeletePdaTask(task.task_id, e)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleDeletePdaTask(task.task_id, e as unknown as React.MouseEvent) }}
                 className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
                 title="Delete task"
               >
