@@ -34,17 +34,10 @@ export function getApiUrl(endpoint: string): string {
 }
 
 /**
- * Get the full WebSocket URL for a given endpoint.
- * Uses same-origin so the browser connects to the frontend port.
- * server.js proxies the /ws/* upgrade to the backend internally.
+ * Get the full WebSocket URL for a given endpoint
  */
 export function getWsUrl(endpoint: string): string {
-  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
-  if (typeof window !== 'undefined') {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}${path}`;
-  }
-  // Server-side fallback
   const base = config.wsUrl.replace(/\/$/, '');
+  const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   return `${base}${path}`;
 }
