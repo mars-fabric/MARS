@@ -665,13 +665,16 @@ async def update_rfp_task_description(task_id: str, body: dict):
 
 @router.get("/recent", response_model=List[RfpRecentTaskResponse])
 async def get_recent_rfp_tasks():
-    """List incomplete RFP tasks for the resume flow."""
+    """List started RFP tasks for the resume flow."""
     db = _get_db()
     try:
         from cmbagent.database.models import WorkflowRun
         runs = (
             db.query(WorkflowRun)
-            .filter(WorkflowRun.mode == "rfp-proposal", WorkflowRun.status == "executing")
+            .filter(
+                WorkflowRun.mode == "rfp-proposal",
+                WorkflowRun.status.in_(["executing", "draft", "completed"]),
+            )
             .order_by(WorkflowRun.started_at.desc())
             .limit(10)
             .all()
@@ -690,10 +693,6 @@ async def get_recent_rfp_tasks():
                     break
 
             pct = progress.get("progress_percent", 0) if isinstance(progress, dict) else 0
-
-            # Skip fully-completed tasks
-            if pct >= 100:
-                continue
 
             results.append(RfpRecentTaskResponse(
                 task_id=run.id,

@@ -163,12 +163,12 @@ export default function RfpProposalTask({ onBack, resumeTaskId }: RfpProposalTas
 
     return (
         <div className="p-6 max-w-7xl mx-auto">
-            {/* In-progress tasks section */}
+            {/* Recent tasks section */}
             {currentStep === 0 && visibleRecentTasks.length > 0 && (
                 <div className="mb-6">
                     <h3 className="text-xs font-medium uppercase tracking-wider mb-2"
                         style={{ color: 'var(--mars-color-text-tertiary)' }}>
-                        In Progress
+                        Recent Tasks
                     </h3>
                     <div className="space-y-2" style={{ maxHeight: '320px', overflowY: 'auto' }}>
                         {visibleRecentTasks.map((task) => (

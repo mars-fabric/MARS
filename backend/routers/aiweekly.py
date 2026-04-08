@@ -529,7 +529,7 @@ async def execute_aiweekly_stage(
 # =============================================================================
 @router.get("/recent", response_model=List[AIWeeklyRecentTaskResponse])
 async def get_recent_aiweekly_tasks():
-    """List incomplete AI Weekly tasks for the resume flow."""
+    """List started AI Weekly tasks for the resume flow."""
     from cmbagent.database.models import WorkflowRun, TaskStage
     from cmbagent.database.base import get_db_session
 
@@ -539,7 +539,7 @@ async def get_recent_aiweekly_tasks():
             db.query(WorkflowRun)
             .filter(
                 WorkflowRun.mode == "aiweekly",
-                WorkflowRun.status.in_(["executing", "draft"]),
+                WorkflowRun.status.in_(["executing", "draft", "completed"]),
             )
             .order_by(WorkflowRun.started_at.desc())
             .limit(10)
@@ -564,10 +564,6 @@ async def get_recent_aiweekly_tasks():
 
             total_stages = len(stages) or 4
             progress = round((completed_count / total_stages) * 100, 1)
-
-            # Skip fully-completed tasks
-            if progress >= 100:
-                continue
 
             results.append(AIWeeklyRecentTaskResponse(
                 task_id=run.id,
