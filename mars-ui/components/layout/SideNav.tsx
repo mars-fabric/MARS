@@ -26,7 +26,7 @@ export default function SideNav({ collapsed, onToggle }: SideNavProps) {
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/'
-    return pathname.startsWith(href)
+    return pathname?.startsWith(href) ?? false
   }
 
   return (
