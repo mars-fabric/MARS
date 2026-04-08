@@ -91,6 +91,7 @@ export default function AIWeeklyReportPanel({ hook, stageNum, onBack }: AIWeekly
                     <p className="text-sm font-medium" style={{ color: 'var(--mars-color-success)' }}>AI Weekly Report Complete</p>
                     <p className="text-xs mt-0.5" style={{ color: 'var(--mars-color-text-secondary)' }}>
                         {taskState?.stages.filter(s => s.status === 'completed').length}/{taskState?.stages.length} stages completed
+                        {taskState?.total_cost_usd != null && ` · Total cost: $${taskState.total_cost_usd.toFixed(4)}`}
                     </p>
                 </div>
             </div>
@@ -119,7 +120,7 @@ export default function AIWeeklyReportPanel({ hook, stageNum, onBack }: AIWeekly
             <div className="p-4 rounded-mars-md border" style={{ backgroundColor: 'var(--mars-color-surface-overlay)', borderColor: 'var(--mars-color-border)' }}>
                 <h3 className="text-sm font-medium mb-3" style={{ color: 'var(--mars-color-text)' }}>Generated Artifacts</h3>
                 <div className="space-y-2">
-                    {['collection.md', 'curated.md', 'report_draft.md', 'report_final.md'].map(file => (
+                    {['collection.md', 'curated.md', 'report_draft.md', 'report_final.md', 'cost_summary.md'].map(file => (
                         <div key={file} className="flex items-center justify-between py-2 px-3 rounded-mars-sm" style={{ backgroundColor: 'var(--mars-color-surface)' }}>
                             <div className="flex items-center gap-2">
                                 <FileText className="w-4 h-4" style={{ color: 'var(--mars-color-text-secondary)' }} />

@@ -231,6 +231,33 @@ async def _run_aiweekly_stage(
             stage_def = next((d for d in STAGE_DEFS if d["number"] == stage_num), {})
             content = output_data.get("shared", {}).get(stage_def.get("shared_key", ""), "")
 
+            # Track cost from phase output
+            cost_data = output_data.get("cost", {})
+            prompt_tokens = cost_data.get("prompt_tokens", 0) if cost_data else 0
+            completion_tokens = cost_data.get("completion_tokens", 0) if cost_data else 0
+            cost_usd = (prompt_tokens * 0.002 + completion_tokens * 0.008) / 1000
+            if prompt_tokens or completion_tokens:
+                try:
+                    from cmbagent.database.repository import CostRepository
+                    from cmbagent.database.models import WorkflowRun as _WR
+                    _run = db.query(_WR).filter(_WR.id == task_id).first()
+                    _sid = _run.session_id if _run else "aiweekly"
+                    cost_repo = CostRepository(db, session_id=_sid)
+                    cost_repo.record_cost(
+                        run_id=task_id,
+                        model=model,
+                        prompt_tokens=prompt_tokens,
+                        completion_tokens=completion_tokens,
+                        cost_usd=cost_usd,
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to record cost: {e}")
+
+            # Ensure cost is stored in output_data for per-stage breakdown
+            if "cost" not in output_data:
+                output_data["cost"] = {}
+            output_data["cost"]["cost_usd"] = cost_usd
+
             if stage_row:
                 stage_row.status = "completed"
                 stage_row.output_data = output_data
@@ -248,6 +275,12 @@ async def _run_aiweekly_stage(
                     run.status = "completed"
                     run.completed_at = datetime.now(timezone.utc)
                     db.commit()
+
+                # Generate cost summary file
+                try:
+                    _generate_cost_summary(task_id, work_dir, all_stages)
+                except Exception as exc:
+                    logger.warning(f"Failed to generate cost summary: {exc}")
 
             print(f"[Stage {stage_num}] ✅ Complete — {len(content)} chars")
         else:
@@ -275,6 +308,90 @@ async def _run_aiweekly_stage(
         sys.stdout = old_stdout
         sys.stderr = old_stderr
         db.close()
+
+
+# =============================================================================
+# Cost summary generator
+# =============================================================================
+
+_STAGE_DISPLAY_NAMES = {
+    1: "Data Collection",
+    2: "Content Curation",
+    3: "Report Generation",
+    4: "Quality Review",
+}
+
+
+def _generate_cost_summary(task_id: str, work_dir: str, stages) -> str:
+    """Generate a formatted cost_summary.md file with per-stage and total cost breakdown."""
+    lines: List[str] = []
+    lines.append("# AI Weekly Report — Cost Summary")
+    lines.append("")
+    lines.append(f"**Task ID:** `{task_id}`")
+    lines.append(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Table header
+    lines.append("## Per-Stage Cost Breakdown")
+    lines.append("")
+    lines.append("| # | Stage | Model | Prompt Tokens | Completion Tokens | Total Tokens | Cost (USD) |")
+    lines.append("|---|-------|-------|--------------|-------------------|-------------|------------|")
+
+    total_prompt = 0
+    total_completion = 0
+    total_tokens = 0
+    total_cost = 0.0
+
+    sorted_stages = sorted(stages, key=lambda s: s.stage_number)
+    for stage in sorted_stages:
+        num = stage.stage_number
+        display = _STAGE_DISPLAY_NAMES.get(num, stage.stage_name or f"Stage {num}")
+        cost_info = {}
+        model_name = "—"
+        if stage.output_data:
+            cost_info = stage.output_data.get("cost", {})
+            artifacts = stage.output_data.get("artifacts", {})
+            model_name = artifacts.get("model", "—")
+
+        pt = cost_info.get("prompt_tokens", 0)
+        ct = cost_info.get("completion_tokens", 0)
+        tt = pt + ct
+        cu = cost_info.get("cost_usd", 0.0)
+
+        total_prompt += pt
+        total_completion += ct
+        total_tokens += tt
+        total_cost += cu
+
+        lines.append(
+            f"| {num} | {display} | {model_name} | "
+            f"{pt:,} | {ct:,} | {tt:,} | ${cu:.4f} |"
+        )
+
+    # Totals row
+    lines.append(f"| | **TOTAL** | | **{total_prompt:,}** | **{total_completion:,}** | **{total_tokens:,}** | **${total_cost:.4f}** |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Summary section
+    lines.append("## Summary")
+    lines.append("")
+    lines.append(f"- **Total Prompt Tokens:** {total_prompt:,}")
+    lines.append(f"- **Total Completion Tokens:** {total_completion:,}")
+    lines.append(f"- **Total Tokens Used:** {total_tokens:,}")
+    lines.append(f"- **Total Cost:** ${total_cost:.4f}")
+    lines.append("")
+
+    content = "\n".join(lines)
+    input_dir = os.path.join(work_dir, "input_files")
+    os.makedirs(input_dir, exist_ok=True)
+    summary_path = os.path.join(input_dir, "cost_summary.md")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return summary_path
 
 
 # =============================================================================
@@ -485,10 +602,29 @@ async def get_aiweekly_task(task_id: str):
         completed = sum(1 for s in stages if s.status == "completed")
         progress = (completed / len(STAGE_DEFS)) * 100 if stages else 0
 
+        # Aggregate cost from per-stage output_data
+        total_cost = None
+        total_cost_usd = None
+        tp, tc, tt = 0, 0, 0
+        cost_usd_sum = 0.0
+        for s in stages:
+            if s.output_data and isinstance(s.output_data, dict):
+                ci = s.output_data.get("cost", {})
+                tp += ci.get("prompt_tokens", 0)
+                tc += ci.get("completion_tokens", 0)
+                cost_usd_sum += ci.get("cost_usd", 0.0)
+        tt = tp + tc
+        if tt > 0:
+            total_cost = {"prompt_tokens": tp, "completion_tokens": tc, "total_tokens": tt}
+            # Use recorded cost_usd if available, otherwise estimate
+            total_cost_usd = cost_usd_sum if cost_usd_sum > 0 else (tp * 0.002 + tc * 0.008) / 1000
+
         return AIWeeklyTaskStateResponse(
             task_id=task_id,
             status=run.status,
             progress=progress,
+            total_cost=total_cost,
+            total_cost_usd=total_cost_usd,
             stages=[
                 AIWeeklyStageResponse(
                     stage_number=s.stage_number,

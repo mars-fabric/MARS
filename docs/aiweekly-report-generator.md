@@ -37,6 +37,7 @@ The feature is registered under the mode **`aiweekly`** and appears in the UI as
 | Curated Items | Markdown | Deduplicated, validated, and enriched master list |
 | Draft Report | Markdown | 4-section report: Executive Summary, Key Highlights, Trends, Quick Reference |
 | **Final Report** | Markdown | **Publication-ready report** polished for quality |
+| Cost Summary | Markdown | Per-stage token usage and USD cost breakdown |
 
 ### 1.3 Key Design Principles
 
@@ -49,6 +50,7 @@ The feature is registered under the mode **`aiweekly`** and appears in the UI as
 | **Dynamic model** | Model resolved from `WorkflowConfig.default_llm_model`; user can override per-stage via UI model settings (centralized `useModelConfig` hook fetches available models from `/api/models/config`) |
 | **Multi-agent** | Stages 2–3 use 3-agent pipeline (primary → specialist → reviewer). Stage 4 uses generate + review only (no specialist) |
 | **Auto-completing** | `WorkflowRun.status` transitions to `"completed"` automatically when all 4 stages finish |
+| **Cost-transparent** | Per-stage cost tracking with aggregated USD totals displayed throughout the workflow; `cost_summary.md` generated on completion |
 | **Real-time feedback** | REST polling delivers live console output during execution |
 | **Resumable** | Tasks persist in SQLite/SQLAlchemy and can resume after reloads |
 
@@ -77,8 +79,8 @@ Runs all data collection tools directly in Python — no LLM involved. Calls:
 | Step | Tool | Description |
 |------|------|-------------|
 | A | `announcements_noauth(limit=300)` | Broad official news page sweep |
-| B | `scrape_official_news_pages(company=X)` × 22 | Direct HTML scraping + RSS feeds + web-search fallback per company (OpenAI, Google, DeepMind, Microsoft, Anthropic, Meta, Amazon, HuggingFace, NVIDIA, Intel, AMD, Apple, Boston Dynamics, Google Quantum, IBM, Quantinuum, Oracle, Samsung, Salesforce) |
-| C | `curated_ai_sources_search(limit=40)` | 25+ curated AI news sources (NVIDIA Developer Blog, Google Cloud/Research, Microsoft Research/Azure, Oracle AI, Meta Engineering, etc.) |
+| B | `scrape_official_news_pages(company=X)` × 19 | Direct HTML scraping + RSS feeds + web-search fallback per company (OpenAI, Google, DeepMind, Microsoft, Anthropic, Meta, Amazon, HuggingFace, NVIDIA, Intel, AMD, Apple, Boston Dynamics, Google Quantum, IBM, Quantinuum, Oracle, Samsung, Salesforce) |
+| C | `curated_ai_sources_search(limit=40)` | 26 curated AI news sources (NVIDIA Developer Blog, Google Cloud/Research, Microsoft Research/Azure, Oracle AI, Meta Engineering, etc.) |
 | D | `newsapi_search()` | NewsAPI (if `NEWSAPI_KEY` set) |
 | E | `gnews_search()` | Google News (if `GNEWS_API_KEY` set) |
 | F | `multi_engine_web_search()` | DDG SDK → Bing → Yahoo → Brave fallback (targeted per under-covered company) |
@@ -150,6 +152,7 @@ After the LLM pass, runs **programmatic verification** — 5 deterministic check
     │
     ├── If in-progress tasks exist:
     │     Cards shown ABOVE setup panel with resume/delete actions
+    │     Scrollable container (max-height 320px) when >5 tasks
     │     Click card → resumeTask(id) → jumps to latest step
     │
     └── Setup: selects date range, topics, sources, style, model settings
@@ -167,8 +170,8 @@ After the LLM pass, runs **programmatic verification** — 5 deterministic check
 
 | Wizard Step | Component | Purpose |
 |---|---|---|
-| 0 | `AIWeeklySetupPanel` | In-progress cards (above) + date range, topic chips, source chips, style selector, model settings (collapsible) |
-| 1–3 | `AIWeeklyReviewPanel` | Split-view editor (60% edit/preview) + refinement chat (40%) |
+| 0 | `AIWeeklySetupPanel` | In-progress cards (above, scrollable when >5) + date range, topic chips, source chips, style selector, model settings (collapsible) |
+| 1–3 | `AIWeeklyReviewPanel` | Resizable split-view editor (edit/preview) + refinement chat — both panes shrinkable to 200px min |
 | 4 | `AIWeeklyReportPanel` | Success banner, report preview, artifact downloads |
 
 ---
@@ -177,20 +180,23 @@ After the LLM pass, runs **programmatic verification** — 5 deterministic check
 
 ### Database (SQLAlchemy)
 
-- **`WorkflowRun`** — one row per task, `mode="ai-weekly"`, `meta.task_config` stores user selections
+- **`WorkflowRun`** — one row per task, `mode="aiweekly"`, `meta.task_config` stores user selections
 - **`TaskStage`** — one row per stage (4 per task), `output_data.shared` stores content
+- **`CostRecord`** — one per stage execution (aggregated cost from all LLM calls within the stage); recorded via `CostRepository.record_cost()`
 
 ### File System
 
-Files are saved in `~/Desktop/cmbdir/weekly/{task_id[:8]}/input_files/`:
+Files are saved in `~/Desktop/cmbdir/aiweekly/{task_id[:8]}/input_files/`:
 
 | File | Source |
 |---|---|
 | `task_config.json` | User selections from setup |
-| `collection.md` | Stage 1 output |
+| `collection.json` | Stage 1 output: structured JSON of all collected items |
+| `collection.md` | Stage 1 output: markdown summary of collected items |
 | `curated.md` | Stage 2 output |
 | `report_draft.md` | Stage 3 output |
 | `report_final.md` | Stage 4 output |
+| `cost_summary.md` | Auto-generated cost breakdown (all stages) |
 
 ---
 
@@ -198,7 +204,7 @@ Files are saved in `~/Desktop/cmbdir/weekly/{task_id[:8]}/input_files/`:
 
 | Technique | Where |
 |---|---|
-| **Multi-source aggregation** | Stage 1 — RSS, APIs, web search across 35+ feeds (including NVIDIA, Google, Microsoft, Oracle, Meta official blogs) |
+| **Multi-source aggregation** | Stage 1 — RSS, APIs, web search across 35+ feeds (including NVIDIA, Google, Microsoft, Oracle, Meta official blogs); 19 priority companies, 26 curated sources |
 | **Generate → Specialist → Review pipeline** | Stages 2–3 — 3 LLM calls per stage |
 | **Token chunking** | Every LLM call via `chunk_prompt_if_needed` (0.75 safety margin) |
 | **Progressive context** | Each stage receives shared state from all prior stages |
@@ -334,7 +340,7 @@ Stops a running AI Weekly task. Cancels any executing background `asyncio.Task`,
 | Max completion tokens | `16384` | `AIWeeklyPhaseConfig.max_completion_tokens` |
 | Reviews per stage | `1` | `AIWeeklyPhaseConfig.n_reviews`; overridable via `config_overrides.n_reviews` |
 | Multi-agent | `True` | `AIWeeklyPhaseConfig.multi_agent` |
-| Stage timeout | `900s` | `_run_weekly_stage()` |
+| Stage timeout | `900s` | `_run_aiweekly_stage()` |
 | Token safety margin | `0.75` | ``chunk_prompt_if_needed()`` |
 
 ### Model Selection — UI to Backend Flow
@@ -359,6 +365,50 @@ This ensures:
 - Completed tasks no longer appear in `GET /api/aiweekly/recent` (which filters by `status in ["executing", "draft"]`)
 - The "In Progress" section on the UI only shows genuinely in-progress tasks
 - Database records accurately reflect true task lifecycle state
+
+---
+
+## Cost Tracking
+
+### Per-Stage Cost Recording
+
+After each stage completes, the backend records LLM token usage to the `CostRecord` table via `CostRepository.record_cost()`:
+
+```python
+cost_usd = (prompt_tokens * 0.002 + completion_tokens * 0.008) / 1000
+cost_repo.record_cost(run_id=task_id, model=model, prompt_tokens=..., completion_tokens=..., cost_usd=cost_usd)
+```
+
+The cost is also stored in `output_data["cost"]` per stage for quick aggregation.
+
+**Note:** Stage 1 (Data Collection) uses no LLM, so it records zero tokens/cost.
+
+### Cost Display in UI
+
+| Location | What's Shown |
+|---|---|
+| **During execution** (`AIWeeklyReviewPanel`, `AIWeeklyReportPanel`) | `$X.XXXX` cost badge (DollarSign icon) — visible when `total_cost_usd > 0` |
+| **Completed report** (`AIWeeklyReportPanel`) | `Total cost: $X.XXXX` in the success banner |
+
+### Cost Summary File
+
+When all 4 stages complete, `_generate_cost_summary()` writes `cost_summary.md` to the task's `input_files/` directory. The file contains:
+
+- **Per-stage table:** `| # | Stage | Model | Prompt Tokens | Completion Tokens | Total Tokens | Cost (USD) |`
+- **Summary section:** Total tokens and total cost in USD
+
+The `cost_summary.md` file is available for download alongside other artifacts in the `AIWeeklyReportPanel`.
+
+### API Response
+
+`GET /api/aiweekly/{task_id}` returns both token counts and USD cost:
+
+```json
+{
+  "total_cost": {"prompt_tokens": 12000, "completion_tokens": 8000, "total_tokens": 20000},
+  "total_cost_usd": 0.0880
+}
+```
 
 ---
 

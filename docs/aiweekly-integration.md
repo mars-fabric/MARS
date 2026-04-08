@@ -15,8 +15,10 @@
 11. [Console Output & Real-Time Streaming](#11-console-output--real-time-streaming)
 12. [Task Resumption](#12-task-resumption)
 13. [Token Capacity Management](#13-token-capacity-management)
-14. [End-to-End User Flow](#14-end-to-end-user-flow)
-15. [Error Handling](#15-error-handling)
+14. [Cost Tracking](#14-cost-tracking)
+15. [End-to-End User Flow](#15-end-to-end-user-flow)
+16. [Error Handling](#16-error-handling)
+17. [Workflow Run Auto-Completion](#17-workflow-run-auto-completion)
 
 ---
 
@@ -31,7 +33,7 @@ Stage 1 uses **direct Python tool calls** (no LLM). Stages 2–4 use a **3-agent
 **Key technologies:**
 - **Backend:** Python, FastAPI, SQLAlchemy, asyncio
 - **Phase System:** `AIWeeklyPhaseBase` → 4 phase subclasses
-- **Data Collection:** `news_tools.py` — direct page scraping, RSS feeds, NewsAPI, GNews, DDG/Bing/Yahoo/Brave; 25+ curated sources covering AI/ML, hardware, robotics, quantum, and cloud/enterprise AI
+- **Data Collection:** `news_tools.py` — direct page scraping, RSS feeds, NewsAPI, GNews, DDG/Bing/Yahoo/Brave; 26 curated sources covering AI/ML, hardware, robotics, quantum, and cloud/enterprise AI
 - **Frontend:** React, TypeScript, Next.js
 - **Real-time:** REST polling (console output)
 - **Default LLM:** Dynamic from `WorkflowConfig.default_llm_model`; per-stage override via `config_overrides` (model, review_model, specialist_model, temperature, n_reviews)
@@ -58,12 +60,13 @@ Stage 1 uses **direct Python tool calls** (no LLM). Stages 2–4 use a **3-agent
 │                         BACKEND (FastAPI)                              │
 │                                                                       │
 │  routers/aiweekly.py ── REST endpoints + phase execution engine       │
-│    _run_weekly_stage():                                               │
+│    _run_aiweekly_stage():                                            │
 │      1. _load_phase_class(stage_num) ── importlib dynamic load        │
 │      2. PhaseClass(config=...)                                         │
 │      3. PhaseContext(task, work_dir, shared_state)                     │
 │      4. await phase.execute(ctx)                                       │
-│      5. Extract output, update DB                                      │
+│      5. Extract output, track cost, update DB                          │
+│      6. On all-complete → _generate_cost_summary() → cost_summary.md │
 │                                                                       │
 │  _ConsoleCapture ── thread-safe stdout/stderr → REST console buffer   │
 └───────────┬──────────────────────────────┬────────────────────────────┘
@@ -74,9 +77,9 @@ Stage 1 uses **direct Python tool calls** (no LLM). Stages 2–4 use a **3-agent
 │                        │    │                                         │
 │  WorkflowRun (task)    │    │  collection_phase.py  (Stage 1, no LLM)│
 │  TaskStage   (×4)      │    │  curation_phase.py    (Stage 2, LLM)   │
-│  output_data.shared    │    │  generation_phase.py  (Stage 3, LLM)   │
-└────────────────────────┘    │  review_phase.py      (Stage 4, LLM)   │
-                              │  base.py              (shared base)     │
+│  CostRecord            │    │  generation_phase.py  (Stage 3, LLM)   │
+│  output_data.shared    │    │  review_phase.py      (Stage 4, LLM)   │
+└────────────────────────┘    │  base.py              (shared base)     │
                               │                                         │
                               │  Uses: news_tools.py (Stage 1)          │
                               │  Uses: rfp/token_utils.py (all stages)  │
@@ -130,8 +133,8 @@ cmbagent/external_tools/
 Calls each tool sequentially, deduplicates by `(url, title[:80])`:
 
 1. `announcements_noauth(limit=300)` — broad official news page sweep
-2. `scrape_official_news_pages(company=X)` × 22 companies — direct HTML scraping + RSS + web-search fallback (OpenAI, Google, DeepMind, Microsoft, Anthropic, Meta, Amazon, HuggingFace, NVIDIA, Intel, AMD, Apple, Boston Dynamics, Google Quantum, IBM, Quantinuum, Oracle, Samsung, Salesforce, and more)
-3. `curated_ai_sources_search(limit=40)` — 25+ curated AI news sources (NVIDIA Developer Blog, Google Cloud/Research, Microsoft Research/Azure, Oracle AI, Meta Engineering, etc.)
+2. `scrape_official_news_pages(company=X)` × 19 companies — direct HTML scraping + RSS + web-search fallback (OpenAI, Google, DeepMind, Microsoft, Anthropic, Meta, Amazon, HuggingFace, NVIDIA, Intel, AMD, Apple, Boston Dynamics, Google Quantum, IBM, Quantinuum, Oracle, Samsung, Salesforce)
+3. `curated_ai_sources_search(limit=40)` — 26 curated AI news sources (NVIDIA Developer Blog, Google Cloud/Research, Microsoft Research/Azure, Oracle AI, Meta Engineering, etc.)
 4. `newsapi_search()` — NewsAPI (if key available)
 5. `gnews_search()` — Google News (if key available)
 6. `multi_engine_web_search()` — DDG SDK → Bing → Yahoo → Brave fallback (targeted per under-covered company)
@@ -153,10 +156,10 @@ Each stage follows the `AIWeeklyPhaseBase.execute()` pattern:
 
 ## 5. Phase-Based Execution Engine
 
-### `_run_weekly_stage()` in `backend/routers/aiweekly.py`
+### `_run_aiweekly_stage()` in `backend/routers/aiweekly.py`
 
 ```python
-async def _run_weekly_stage(task_id, stage_num, task_text, work_dir, task_config, model, n_reviews):
+async def _run_aiweekly_stage(task_id, stage_num, task_text, work_dir, task_config, model, n_reviews):
     # 1. Capture stdout/stderr for console streaming
     cap = _ConsoleCapture(buf_key, sys.stdout)
     sys.stdout = cap
@@ -253,7 +256,7 @@ Frontend polls `GET /{id}/stages/{N}/console?since={index}` every 2 seconds. Ret
 | `mode` | `"aiweekly"` |
 | `agent` | `"phase_orchestrator"` |
 | `status` | `"executing"` → `"completed"` (auto-set when all 4 stages complete) / `"failed"` |
-| `meta.work_dir` | `~/Desktop/cmbdir/weekly/<id[:8]>` |
+| `meta.work_dir` | `~/Desktop/cmbdir/aiweekly/<id[:8]>` |
 | `meta.task_config` | `{date_from, date_to, topics, sources, style}` |
 | `meta.orchestration` | `"phase-based"` |
 
@@ -331,8 +334,8 @@ TaskList.tsx (card: "AI Weekly Report")
        │              ├─ Review Model dropdown
        │              └─ Specialist Model dropdown
        ├─ AIWeeklyReviewPanel.tsx (Steps 1–3)
-       │    ├─ Edit/Preview toggle (60%)
-       │    ├─ RefinementChat (40%)
+       │    ├─ ResizableSplitPane: Edit/Preview (left) + RefinementChat (right)
+       │    │    Both panes resizable down to 200px minimum
        │    └─ ExecutionProgress (while running)
        └─ AIWeeklyReportPanel.tsx (Step 4)
             ├─ Success banner
@@ -340,7 +343,7 @@ TaskList.tsx (card: "AI Weekly Report")
             └─ Artifact download links
 ```
 
-**In-progress section:** When on Step 0, `AIWeeklyReportTask.tsx` fetches `GET /api/aiweekly/recent` on mount. If there are in-progress tasks, they are rendered as clickable cards **above** the setup panel (inside the same page — not a separate landing page). Each card shows the task name, current stage, progress bar, and resume/delete actions. The currently active task (if any) is filtered out of the list.
+**In-progress section:** When on Step 0, `AIWeeklyReportTask.tsx` fetches `GET /api/aiweekly/recent` on mount. If there are in-progress tasks, they are rendered as clickable cards **above** the setup panel (inside the same page — not a separate landing page). Each card shows the task name, current stage, progress bar, and resume/delete actions. The currently active task (if any) is filtered out of the list. When more than ~5 tasks are listed, the section becomes scrollable (max-height 320px with overflow-y auto) to prevent the setup panel from being pushed too far down.
 
 **Model settings:** The setup panel includes a collapsible "Model Settings" section that uses the centralized `useModelConfig()` hook to fetch available models from `/api/models/config` (with static fallback). Users can select different models for the Primary (generation), Review (quality check), and Specialist (fact-check) roles.
 
@@ -391,7 +394,7 @@ When `AIWeeklyReportTask.tsx` loads, it fetches incomplete AI Weekly tasks via `
 - **Resume arrow** — click to call `resumeTask(id)` which loads the task at the right step
 - **Delete (X) button** — calls `DELETE /api/aiweekly/{id}` after confirm dialog
 
-The currently active task is filtered out of the in-progress list to avoid duplication. When no task is active, the user sees the in-progress cards above the normal setup form — both are always visible (not a separate landing page).
+The currently active task is filtered out of the in-progress list to avoid duplication. When more than ~5 tasks are listed, the section becomes scrollable (max-height 320px) to keep the page layout manageable. When no task is active, the user sees the in-progress cards above the normal setup form — both are always visible (not a separate landing page).
 
 ### Resume Logic
 
@@ -419,7 +422,35 @@ Refinement endpoint also computes token budget before calling `safe_completion()
 
 ---
 
-## 14. End-to-End User Flow
+## 14. Cost Tracking
+
+Each LLM call's token usage is tracked per-stage and recorded to the database via `CostRepository`.
+
+### Per-Stage Cost Storage
+
+- Stages 2–4 return token counts in `output_data["cost"]` (`prompt_tokens`, `completion_tokens`, `total_tokens`)
+- The router calculates `cost_usd = (prompt_tokens × 0.002 + completion_tokens × 0.008) / 1000` and stores it in both:
+  - `CostRecord` (database table) for persistent tracking
+  - `output_data["cost"]["cost_usd"]` per TaskStage for the cost summary
+- Stage 1 (Data Collection) has no LLM cost — tokens will be 0
+
+### Cost Summary File
+
+When all 4 stages complete, the backend generates `cost_summary.md` in `input_files/` with:
+
+- **Per-stage breakdown table** — stage name, model, prompt/completion/total tokens, cost (USD)
+- **Totals row** — aggregated across all stages
+- **Summary section** — bullet-point totals
+
+Downloadable from the **Generated Artifacts** section on Step 4 via `GET /api/aiweekly/{id}/download/cost_summary.md`.
+
+### Total Cost in API Response
+
+`GET /api/aiweekly/{id}` returns `total_cost: { prompt_tokens, completion_tokens, total_tokens }` aggregated from all completed stages.
+
+---
+
+## 15. End-to-End User Flow
 
 1. User opens Tasks → clicks "AI Weekly Report"
 2. **Setup:** Configures date range, picks topics/sources, selects style
@@ -432,11 +463,11 @@ Refinement endpoint also computes token budget before calling `safe_completion()
 9. **Stage 3 auto-executes:** Report generation (LLM + specialist)
 10. User reviews draft report, refines via chat, clicks **Next**
 11. **Stage 4 auto-executes:** Quality review (LLM only)
-12. **Final report displayed** with download links for all artifacts
+12. **Final report displayed** with download links for all artifacts + cost summary
 
 ---
 
-## 15. Error Handling
+## 16. Error Handling
 
 | Error | Handling |
 |---|---|
@@ -450,7 +481,7 @@ Refinement endpoint also computes token budget before calling `safe_completion()
 
 ---
 
-## 16. Workflow Run Auto-Completion
+## 17. Workflow Run Auto-Completion
 
 When the last stage completes, `_run_aiweekly_stage()` automatically checks whether all `TaskStage` rows for the task have `status == "completed"`. If so, it transitions the parent `WorkflowRun`:
 

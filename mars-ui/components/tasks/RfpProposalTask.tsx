@@ -165,46 +165,48 @@ export default function RfpProposalTask({ onBack, resumeTaskId }: RfpProposalTas
         <div className="p-6 max-w-7xl mx-auto">
             {/* In-progress tasks section */}
             {currentStep === 0 && visibleRecentTasks.length > 0 && (
-                <div className="mb-6 space-y-2">
-                    <h3 className="text-xs font-medium uppercase tracking-wider"
+                <div className="mb-6">
+                    <h3 className="text-xs font-medium uppercase tracking-wider mb-2"
                         style={{ color: 'var(--mars-color-text-tertiary)' }}>
                         In Progress
                     </h3>
-                    {visibleRecentTasks.map((task) => (
-                        <button key={task.task_id} onClick={() => handleResumeRecent(task.task_id)}
-                            className="w-full flex items-center gap-3 p-3 rounded-mars-md border transition-colors hover:border-[var(--mars-color-primary)]"
-                            style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
-                            <div className="flex-shrink-0 w-8 h-8 rounded-mars-md flex items-center justify-center"
-                                style={{ background: 'linear-gradient(135deg, #ec4899, #f43f5e)' }}>
-                                <BookOpen className="w-4 h-4 text-white" />
-                            </div>
-                            <div className="flex-1 text-left min-w-0">
-                                <p className="text-sm font-medium truncate" style={{ color: 'var(--mars-color-text)' }}>
-                                    RFP Proposal{task.task ? ` — ${task.task}` : ''}
-                                </p>
-                                <p className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
-                                    {task.current_stage
-                                        ? `Stage ${task.current_stage}: ${RFP_STAGE_LABEL_MAP[task.current_stage] || ''}`
-                                        : 'Starting...'}
-                                    {' '}&middot;{' '}
-                                    {Math.round(task.progress_percent)}% complete
-                                </p>
-                            </div>
-                            <div className="flex-shrink-0 w-20 h-1.5 rounded-full overflow-hidden"
-                                style={{ backgroundColor: 'var(--mars-color-surface-overlay)' }}>
-                                <div className="h-full rounded-full transition-all"
-                                    style={{ width: `${Math.max(5, task.progress_percent)}%`, background: 'linear-gradient(90deg, #ec4899, #f43f5e)' }} />
-                            </div>
-                            <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--mars-color-text-tertiary)' }} />
-                            <div role="button" tabIndex={0}
-                                onClick={(e) => handleDeleteRecent(task.task_id, e)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteRecent(task.task_id, e as unknown as React.MouseEvent) }}
-                                className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
-                                title="Delete task">
-                                <X className="w-3.5 h-3.5" style={{ color: 'var(--mars-color-text-tertiary)' }} />
-                            </div>
-                        </button>
-                    ))}
+                    <div className="space-y-2" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                        {visibleRecentTasks.map((task) => (
+                            <button key={task.task_id} onClick={() => handleResumeRecent(task.task_id)}
+                                className="w-full flex items-center gap-3 p-3 rounded-mars-md border transition-colors hover:border-[var(--mars-color-primary)]"
+                                style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
+                                <div className="flex-shrink-0 w-8 h-8 rounded-mars-md flex items-center justify-center"
+                                    style={{ background: 'linear-gradient(135deg, #ec4899, #f43f5e)' }}>
+                                    <BookOpen className="w-4 h-4 text-white" />
+                                </div>
+                                <div className="flex-1 text-left min-w-0">
+                                    <p className="text-sm font-medium truncate" style={{ color: 'var(--mars-color-text)' }}>
+                                        RFP Proposal{task.task ? ` — ${task.task}` : ''}
+                                    </p>
+                                    <p className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
+                                        {task.current_stage
+                                            ? `Stage ${task.current_stage}: ${RFP_STAGE_LABEL_MAP[task.current_stage] || ''}`
+                                            : 'Starting...'}
+                                        {' '}&middot;{' '}
+                                        {Math.round(task.progress_percent)}% complete
+                                    </p>
+                                </div>
+                                <div className="flex-shrink-0 w-20 h-1.5 rounded-full overflow-hidden"
+                                    style={{ backgroundColor: 'var(--mars-color-surface-overlay)' }}>
+                                    <div className="h-full rounded-full transition-all"
+                                        style={{ width: `${Math.max(5, task.progress_percent)}%`, background: 'linear-gradient(90deg, #ec4899, #f43f5e)' }} />
+                                </div>
+                                <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--mars-color-text-tertiary)' }} />
+                                <div role="button" tabIndex={0}
+                                    onClick={(e) => handleDeleteRecent(task.task_id, e)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteRecent(task.task_id, e as unknown as React.MouseEvent) }}
+                                    className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
+                                    title="Delete task">
+                                    <X className="w-3.5 h-3.5" style={{ color: 'var(--mars-color-text-tertiary)' }} />
+                                </div>
+                            </button>
+                        ))}
+                    </div>
                 </div>
             )}
 

@@ -211,7 +211,7 @@ export default function RfpProposalPanel({ hook, stageNum, onBack }: RfpProposal
                     Generated Artifacts
                 </h3>
                 <div className="space-y-2">
-                    {['requirements.md', 'tools.md', 'cloud.md', 'implementation.md', 'architecture.md', 'execution.md', 'proposal.md'].map((file) => (
+                    {['requirements.md', 'tools.md', 'cloud.md', 'implementation.md', 'architecture.md', 'execution.md', 'proposal.md', 'cost_summary.md'].map((file) => (
                         <div
                             key={file}
                             className="flex items-center justify-between py-2 px-3 rounded-mars-sm"

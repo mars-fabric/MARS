@@ -71,6 +71,7 @@ Each stage uses a dedicated **Phase class** (`cmbagent/phases/rfp/`) with a **3-
 │      3. PhaseContext(task, work_dir, shared_state)                    │
 │      4. await phase.execute(ctx)      ── generate → review cycle     │
 │      5. Extract output, track cost, update DB                        │
+│      6. On all-complete → _generate_cost_summary() → cost_summary.md │
 │                                                                       │
 │  main.py          ── WebSocket /ws/rfp/{task_id}/{stage_num}         │
 │  services/pdf_extractor.py ── rich PDF extraction (text+tables+images)│
@@ -145,6 +146,7 @@ cmbagent_workdir/sessions/{session_id}/tasks/{task_id}/input_files/
 ├── architecture.md            # Stage 5 output
 ├── execution.md               # Stage 6 output
 ├── proposal.md                # Stage 7 output (final proposal)
+├── cost_summary.md            # Auto-generated cost breakdown (per-stage + total)
 └── [user-uploaded files]      # PDFs, DOCX, etc.
 ```
 
@@ -378,11 +380,15 @@ async def _run_rfp_stage(task_id, stage_num, work_dir, rfp_content,
     # 5. Extract content from result
     content = result.context.output_data["shared"][shared_key]
 
-    # 6. Track cost
-    cost_repo.record_cost(parent_run_id=task_id, model=model, ...)
+    # 6. Track cost — record to DB + store in output_data["cost"]
+    cost_repo.record_cost(run_id=task_id, model=model, prompt_tokens=..., ...)
 
-    # 7. Save to file + update DB stage status
+    # 7. Save to file + update DB stage status (with per-stage cost)
     repo.update_stage_status(stage.id, status="completed", output_data=output_data)
+
+    # 8. If all 7 stages complete → generate cost_summary.md
+    if all(s.status == "completed" for s in all_stages):
+        _generate_cost_summary(task_id, work_dir, all_stages, cost_repo)
 ```
 
 ---
@@ -505,10 +511,13 @@ Source: `cmbagent/database/models.py`, `cmbagent/database/repository.py`
 
 | Column | Description |
 |--------|-------------|
-| `parent_run_id` | FK → WorkflowRun.id |
+| `run_id` | FK → WorkflowRun.id (primary FK) |
+| `session_id` | FK → Session.id |
+| `parent_run_id` | FK → WorkflowRun.id (nullable, for sub-tasks) |
 | `model` | Model used (from `WorkflowConfig` or `config_overrides`) |
 | `prompt_tokens` | Input tokens |
 | `completion_tokens` | Output tokens |
+| `total_tokens` | Prompt + completion combined |
 | `cost_usd` | Calculated cost |
 
 ### Repositories
@@ -563,18 +572,18 @@ Actions: `createTask()`, `executeStage()`, `fetchStageContent()`, `saveStageCont
 
 ### Wizard Container (`mars-ui/components/tasks/RfpProposalTask.tsx`)
 
-8-step wizard with `Stepper` navigation. On mount, fetches `GET /api/rfp/recent` for in-progress tasks. When on Step 0, the "In Progress" cards render **above the setup panel** (inside the same view — not a separate landing page):
+8-step wizard with `Stepper` navigation. On mount, fetches `GET /api/rfp/recent` for in-progress tasks. When on Step 0, the "In Progress" cards render **above the setup panel** (inside the same view — not a separate landing page). When more than ~5 tasks are listed, the section becomes scrollable (max-height 320px with overflow-y auto):
 
 | Step | Component | Stage |
 |------|-----------|-------|
-| 0 | In-progress cards + `RfpSetupPanel` (with model settings) | (no stage) |
+| 0 | In-progress cards (scrollable when >5) + `RfpSetupPanel` (with model settings) | (no stage) |
 | 1–6 | `RfpReviewPanel` | Stages 1–6 |
 | 7 | `RfpProposalPanel` | Stage 7 |
 
 ### Panel Components
 
 - **RfpSetupPanel** — File upload (above textarea), RFP content textarea (auto-populated from PDF), additional context, model settings toggle (gear icon → `RfpStageAdvancedSettings.tsx` using centralized `useModelConfig()` hook), "Analyze Requirements" button
-- **RfpReviewPanel** — 60% editor/preview + 40% refinement chat, auto-save (1s debounce), stage execution monitoring
+- **RfpReviewPanel** — Resizable editor/preview + refinement chat via `ResizableSplitPane` (both panes shrinkable to 200px min), auto-save (1s debounce), stage execution monitoring
 - **RfpProposalPanel** — Success banner, proposal preview, download links for all 7 artifacts
 
 ---
@@ -591,7 +600,7 @@ Uses PyMuPDF (fitz) to extract:
 - **Text** — Block-level extraction with table region deduplication
 - **Tables** — `page.find_tables()` → markdown table format
 - **Images** — Dimensions, format descriptions
-- Output cap: 500KB
+- Output cap: 512KB
 
 ### File Context Injection
 
@@ -623,7 +632,7 @@ When `RfpProposalTask.tsx` loads, it fetches incomplete RFP tasks via `GET /api/
 - **Resume arrow** — calls `resumeTask(id)` to load the task at the correct step
 - **Delete (X) button** — calls `DELETE /api/rfp/{id}` after confirm dialog
 
-The currently active task is filtered out of the in-progress list to avoid duplication. Both the in-progress cards and the setup form are always visible together — not a separate landing page.
+The currently active task is filtered out of the in-progress list to avoid duplication. When more than ~5 tasks are listed, the section becomes scrollable (max-height 320px) to keep the page layout manageable. Both the in-progress cards and the setup form are always visible together — not a separate landing page.
 
 ### Resume Logic
 
@@ -652,9 +661,30 @@ The setup panel includes a **Model Settings** toggle (gear icon) that exposes th
 
 Each LLM call's token usage is recorded via `CostRepository`:
 - Input tokens × $0.002/1K + output tokens × $0.008/1K (GPT-4.1 pricing)
-- Per-stage cost stored in `output_data["cost"]`
+- Per-stage cost stored in `output_data["cost"]` (prompt_tokens, completion_tokens, cost_usd)
 - Total cost exposed via `GET /api/rfp/{task_id}` → `total_cost_usd`
 - Displayed in header bar, execution panel, and proposal success banner
+
+### Cost Summary File
+
+When all 7 stages complete, the backend automatically generates `cost_summary.md` in the task's `input_files/` directory (alongside the stage outputs). The file contains:
+
+- **Per-stage breakdown table** — stage name, model, prompt tokens, completion tokens, total tokens, and cost (USD) for each of the 7 stages
+- **Totals row** — aggregated across all stages
+- **Summary section** — bullet-point totals for quick reference
+
+The file is downloadable from the **Generated Artifacts** section in ``RfpProposalPanel`` (Step 7) via `GET /api/rfp/{task_id}/download/cost_summary.md`.
+
+Example output:
+
+```
+| # | Stage                        | Model   | Prompt Tokens | Completion Tokens | Total Tokens | Cost (USD) |
+|---|------------------------------|---------|--------------|-------------------|-------------|------------|
+| 1 | Requirements Analysis        | gpt-4.1 | 2,450        | 3,120             | 5,570       | $0.0298    |
+| 2 | Tools & Technology Selection | gpt-4.1 | 5,800        | 4,200             | 10,000      | $0.0452    |
+| … | …                            | …       | …            | …                 | …           | …          |
+|   | **TOTAL**                    |         | **42,000**   | **28,000**        | **70,000**  | **$0.3080**|
+```
 
 ---
 
@@ -784,10 +814,11 @@ If a prompt exceeds capacity but has no `---` section boundaries to split on, `c
 |-------|------------|------------|
 | `gpt-4o` | 128,000 | 16,384 |
 | `gpt-4o-mini` | 128,000 | 16,384 |
+| `gpt-4o-mini-2024-07-18` | 128,000 | 16,384 |
 | `gpt-4.1` / `gpt-4.1-2025-04-14` | 1,000,000 | 32,768 |
 | `gpt-4.1-mini` | 1,000,000 | 32,768 |
 | `gpt-5.3` | 1,000,000 | 32,768 |
-| `o3-mini` | 128,000 | 16,384 |
+| `o3-mini` / `o3-mini-2025-01-31` | 128,000 | 16,384 |
 | `claude-sonnet-4-20250514` | 200,000 | 8,192 |
 | `claude-3.5-sonnet-20241022` | 200,000 | 8,192 |
 | `gemini-2.5-pro` | 1,000,000 | 8,192 |
@@ -989,13 +1020,14 @@ if content_tokens > usable_for_content:
 ### Steps 1–6: Iterative Review
 1. Stage executes in background (`_run_rfp_stage` → `phase.execute()`)
 2. Live console output via WebSocket
-3. On completion: split-view editor (60%) + refinement chat (40%)
+3. On completion: resizable split-view editor + refinement chat (both panes shrinkable to 200px min)
 4. User reviews, edits, refines → clicks "Next" → saves edits → triggers next stage
 
 ### Step 7: Proposal Compilation
 1. `executeStage(7)` — all 6 prior outputs injected into prompt
 2. LLM compiles comprehensive proposal with all sections + appendices
-3. Success banner + PDF preview (resizable modal with embedded PDF viewer) + download links for all 7 artifacts
+3. `cost_summary.md` auto-generated with per-stage and total cost breakdown
+4. Success banner + PDF preview (resizable modal with embedded PDF viewer) + download links for all 7 artifacts + cost summary
 
 ---
 
@@ -1050,4 +1082,4 @@ For full details, see the [Multi-Agent System section in rfp-proposal-generator.
 
 ---
 
-*Last updated: March 2026*
+*Last updated: April 2026*

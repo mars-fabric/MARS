@@ -15,6 +15,7 @@ export interface AIWeeklyTaskState {
     progress: number
     stages: AIWeeklyStage[]
     total_cost?: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+    total_cost_usd?: number | null
 }
 
 export interface AIWeeklyCreateResponse {

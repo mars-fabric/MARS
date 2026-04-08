@@ -47,6 +47,7 @@ Starting from an RFP document, the system outputs:
 | Architecture Design | Markdown | System architecture with component diagrams and ADRs |
 | Execution Strategy | Markdown | Full execution strategy from kickoff to post-launch |
 | **Compiled Proposal** | Markdown | **Final compiled proposal** with executive summary, pricing, and appendices |
+| Cost Summary | Markdown | Per-stage token usage and USD cost breakdown |
 
 ### 1.3 Key Design Principles
 
@@ -60,7 +61,7 @@ Starting from an RFP document, the system outputs:
 | **Resumable** | Tasks persist in a database and can be resumed after page reloads or interruptions |
 | **Auto-completing** | `WorkflowRun.status` transitions to `"completed"` automatically when all 7 stages finish |
 | **Cost-transparent** | Per-LLM-call cost tracking is aggregated and displayed throughout the workflow |
-| **Editable at every stage** | Split-view editor (60% preview + 40% refinement chat) |
+| **Editable at every stage** | Resizable split-view editor (edit/preview + refinement chat) — both panes shrinkable to 200px min |
 | **Token-safe** | Every LLM call has dynamic `max_completion_tokens` capping and automatic prompt chunking (0.75 safety margin) |
 | **Dynamic currency** | Currency is extracted from the RFP (Stage 1) and propagated to all cost-producing stages; defaults to USD ($) |
 | **Zero data loss** | Stage 7 uses a divide-and-accumulate strategy — no source data is ever truncated, condensed, or dropped |
@@ -139,7 +140,7 @@ The RFP Proposal Generator is an **8-step wizard** in the UI, mapping to **7 bac
 
 | Feature | Details |
 |---|---|
-| **Split view** | 60% markdown editor/preview + 40% refinement chat |
+| **Split view** | Resizable editor/preview + refinement chat via `ResizableSplitPane` (both panes shrinkable to 200px min) |
 | **Auto-save** | Content saved to DB + disk after 1s debounce on edit |
 | **AI refinement** | User types instruction → LLM refines content → user clicks "Apply" |
 | **Next button** | Saves edits, then triggers next stage's phase execution |
@@ -172,6 +173,7 @@ User clicks "RFP Proposal Generator" in TaskList.tsx
        │
        ├── Step 0: In-progress section (above) + RfpSetupPanel.tsx
        │     ├── In-progress cards: fetches GET /api/rfp/recent on mount
+       │     │     └── Scrollable container (max-height 320px) when >5 tasks
        │     │     └── Click card → resumeTask(id) → jumps to latest step
        │     ├── User uploads PDF → pdf_extractor.py extracts text → auto-fills textarea
        │     ├── User enters/edits RFP content + additional context
@@ -236,7 +238,7 @@ hook.executeStage(N, taskId)                              [useRfpTask.ts]
 WebSocket receives "stage_completed"
   │
   ├── fetchStageContent(N) → loads generated content into editor
-  ├── Split-view: Editor/Preview (60%) + Refinement Chat (40%)
+  ├── Split-view: ResizableSplitPane — Editor/Preview + Refinement Chat (both panes shrinkable to 200px min)
   │
   ├── USER ACTIONS:
   │     ├── Edit markdown directly → auto-save after 1s debounce
@@ -302,7 +304,7 @@ Tasks are fully persistent and can be resumed:
    - Completed stage → show content in editor (editable)
    - Pending/failed stage → stop at that step (user can retry)
 
-**In Progress layout:** When on Step 0, the RFP component fetches `GET /api/rfp/recent` on mount and displays in-progress task cards **above the setup panel** (inside the same page view). Each card shows the task name, current stage, progress bar, and resume/delete actions. The currently active task is filtered out of the list. Both the in-progress cards and the setup form are always visible together — not a separate landing page.
+**In Progress layout:** When on Step 0, the RFP component fetches `GET /api/rfp/recent` on mount and displays in-progress task cards **above the setup panel** (inside the same page view). Each card shows the task name, current stage, progress bar, and resume/delete actions. The currently active task is filtered out of the list. When more than ~5 tasks are listed, the section becomes scrollable (max-height 320px with overflow-y auto) to prevent the setup panel from being pushed too far down. Both the in-progress cards and the setup form are always visible together — not a separate landing page.
 
 ### 3.7 Workflow Run Auto-Completion
 
@@ -334,7 +336,8 @@ Every task gets a dedicated directory:
 │   ├── implementation.md     ◄── Stage 4 output (editable)
 │   ├── architecture.md       ◄── Stage 5 output (editable)
 │   ├── execution.md          ◄── Stage 6 output (editable)
-│   └── proposal.md           ◄── Stage 7 output (final compiled proposal)
+│   ├── proposal.md           ◄── Stage 7 output (final compiled proposal)
+│   └── cost_summary.md       ◄── Auto-generated cost breakdown (all stages)
 ```
 
 ### 4.2 Database Records
@@ -346,7 +349,7 @@ Each task creates:
 | **Session** | 1 | Groups all records; supports suspend/resume (mode="rfp-proposal") |
 | **WorkflowRun** | 1 | Parent task record (mode, status, work_dir, config, task_description) |
 | **TaskStage** | 7 | One per stage (status, input_data, output_data, timing, error_message) |
-| **CostRecord** | 21+ | One per LLM call: 7 stages × 3 agents (primary + specialist + reviewer) + Stage 7 divide-and-accumulate calls + any refinement calls |
+| **CostRecord** | 7+ | One per stage execution (aggregated cost from all LLM calls within the stage: primary + specialist + reviewer) + any refinement calls |
 
 ### 4.3 Shared State — Cumulative Context
 
@@ -403,13 +406,17 @@ STAGE_DEFS = [
 
 ## 5. AI Techniques Used
 
-### 5.1 Phase-Based Generate → Review Cycle
+### 5.1 Phase-Based Generate → Specialist → Review Cycle
 
-Each of the 7 stages uses a dedicated `RfpPhaseBase` subclass that runs a **two-pass execution model**:
+Each of the 7 stages uses a dedicated `RfpPhaseBase` subclass that runs a **three-pass execution model** (when `multi_agent=True`, the default):
 
 **Pass 1 — Generation:** The phase's `system_prompt` defines an expert AI persona. The `build_user_prompt(context)` method constructs the full prompt including RFP content, uploaded file context, and all prior stages' output from `shared_state`.
 
-**Pass 2 — Review:** A shared `review_system_prompt` (defined in `RfpPhaseBase`) acts as a senior proposal reviewer with a **13-point quality checklist**. The reviewer receives the draft and improves it to professional submission quality.
+**Pass 2 — Specialist Validation:** A dedicated specialist agent (defined via `specialist_system_prompt`) validates, enriches, and adds domain-specific depth to the draft. Each stage has a unique specialist role (e.g., Security & Compliance Auditor for Stage 2, Cloud Cost Optimisation Specialist for Stage 3). The specialist output must exceed 30% of the original length to be accepted.
+
+**Pass 3 — Review:** A shared `review_system_prompt` (defined in `RfpPhaseBase`) acts as a senior proposal reviewer with a **13-point quality checklist**. The reviewer receives the specialist-improved draft and polishes it to professional submission quality.
+
+> **Note:** Set `multi_agent=False` to revert to the original 2-pass (generate → review) cycle, skipping the specialist pass.
 
 ```
 Generation prompt structure:
@@ -417,12 +424,16 @@ Generation prompt structure:
   user:   phase.build_user_prompt(context)
           → includes RFP text, uploaded files, all prior stage outputs
 
+Specialist prompt structure:
+  system: "You are a [specialist role]..."
+  user:   "Document to validate and improve:\n\n{draft}" + currency_rule
+
 Review prompt structure:
   system: "You are a senior proposal reviewer...  Specifically:
            1. Fix factual errors...
            2. Ensure all cost figures...
            ...13 checklist items..."
-  user:   "Draft document:\n\n{generated_content}"
+  user:   "Draft document:\n\n{specialist_improved_content}"
 ```
 
 ### 5.2 Cumulative Context Injection
@@ -496,7 +507,7 @@ Uploaded RFP documents are scanned by `_build_rfp_context()` and their content i
 
 | File Type | Extraction Method |
 |---|---|
-| `.pdf` | Rich extraction via `pdf_extractor.py` — text, tables (markdown), image descriptions (up to 500KB) |
+| `.pdf` | Rich extraction via `pdf_extractor.py` — text, tables (markdown), image descriptions (up to 512KB) |
 | `.txt`, `.md`, `.csv`, `.json`, `.xml`, `.html` | Full content preview (first 4KB) |
 | Other files | Metadata only (name, size, path) |
 
@@ -650,8 +661,9 @@ _ConsoleCapture (per stage)
 │  │    runs       │    │       ├── tools.md                  │          │
 │  │  - task_      │    │       ├── cloud.md, impl, arch, ..  │          │
 │  │    stages     │    │       ├── execution.md              │          │
-│  │  - cost_      │    │       └── proposal.md               │          │
-│  │    records    │    └───────────────────────────────────┘          │
+│  │  - cost_      │    │       ├── proposal.md               │          │
+│  │    records    │    │       └── cost_summary.md            │          │
+│  │               │    └───────────────────────────────────┘          │
 │  └──────────────┘                                                    │
 └─────────────────────────────────────────────────────────────────────┘
 ```
@@ -860,7 +872,7 @@ WHERE parent_run_id = '{task_id}' ORDER BY stage_number;
 | **SessionManager** | Service for creating and managing sessions |
 | **Stepper** | UI component showing the 8-step wizard progress indicator |
 | **RefinementChat** | AI-powered chat sidebar for iterative content improvement |
-| **Split-View Editor** | 60% markdown editor/preview + 40% refinement chat layout |
+| **Split-View Editor** | Resizable editor/preview + refinement chat layout via `ResizableSplitPane` (both panes shrinkable to 200px min) |
 | **Token capacity management** | System that prevents context window overflow at every LLM call via dynamic capping, prompt chunking, and 0.75 safety margin |
 | **Safety margin (0.75)** | Fraction of model context window used for budget calculation — accounts for tiktoken undercounting by 10–20% |
 | **Dynamic currency** | Currency code and symbol extracted from the RFP at Stage 1, propagated to all cost-producing stages |
@@ -1016,7 +1028,7 @@ This section provides an exhaustive trace of every class, function, database mod
 | **`Session`** | `cmbagent/database/models.py` | Groups all runs/stages/costs | `id`, `name`, `status`, `created_at` |
 | **`WorkflowRun`** | `cmbagent/database/models.py` | Parent task record | `id`, `session_id`, mode=`"rfp-proposal"`, agent=`"phase_orchestrator"`, `task_description`, `meta` |
 | **`TaskStage`** | `cmbagent/database/models.py` | Per-stage tracking (×7) | `id`, `parent_run_id`, `stage_number`, `stage_name`, `status`, `output_data`, `error_message` |
-| **`CostRecord`** | `cmbagent/database/models.py` | Per-LLM-call cost | `parent_run_id`, `model`, `prompt_tokens`, `completion_tokens`, `cost_usd` |
+| **`CostRecord`** | `cmbagent/database/models.py` | Per-LLM-call cost | `run_id`, `session_id`, `parent_run_id` (nullable), `model`, `prompt_tokens`, `completion_tokens`, `total_tokens`, `cost_usd` |
 
 #### 11.2.4 Repository Classes
 
@@ -1039,7 +1051,7 @@ This section provides an exhaustive trace of every class, function, database mod
 |---|---|---|
 | **`RfpProposalTask`** | `components/tasks/RfpProposalTask.tsx` | 8-step wizard container with Stepper navigation |
 | **`RfpSetupPanel`** | `components/rfp/RfpSetupPanel.tsx` | Step 0: file upload, RFP text, context, submit |
-| **`RfpReviewPanel`** | `components/rfp/RfpReviewPanel.tsx` | Steps 1–6: split-view editor + refinement chat |
+| **`RfpReviewPanel`** | `components/rfp/RfpReviewPanel.tsx` | Steps 1–6: resizable split-view editor + refinement chat |
 | **`RfpExecutionPanel`** | `components/rfp/RfpExecutionPanel.tsx` | Stage execution progress with timer and cost |
 | **`RfpProposalPanel`** | `components/rfp/RfpProposalPanel.tsx` | Step 7: proposal preview + download artifacts |
 | **`RefinementChat`** | `components/deepresearch/RefinementChat.tsx` | Chat sidebar for AI-powered content improvement |
@@ -1322,10 +1334,11 @@ All **11 LLM call sites** (with `multi_agent=True`) in the RFP pipeline are prot
 |-------|------------|------------|
 | `gpt-4o` | 128,000 | 16,384 |
 | `gpt-4o-mini` | 128,000 | 16,384 |
+| `gpt-4o-mini-2024-07-18` | 128,000 | 16,384 |
 | `gpt-4.1` / `gpt-4.1-2025-04-14` | 1,000,000 | 32,768 |
 | `gpt-4.1-mini` | 1,000,000 | 32,768 |
 | `gpt-5.3` | 1,000,000 | 32,768 |
-| `o3-mini` | 128,000 | 16,384 |
+| `o3-mini` / `o3-mini-2025-01-31` | 128,000 | 16,384 |
 | `claude-sonnet-4-20250514` | 200,000 | 8,192 |
 | `claude-3.5-sonnet-20241022` | 200,000 | 8,192 |
 | `gemini-2.5-pro` | 1,000,000 | 8,192 |
@@ -1537,4 +1550,4 @@ The specialist pass has the same full token protection as all other LLM calls:
 
 ---
 
-*Last updated: March 2026*
+*Last updated: April 2026*

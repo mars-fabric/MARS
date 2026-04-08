@@ -65,6 +65,7 @@ class AIWeeklyTaskStateResponse(BaseModel):
     progress: float
     stages: List[AIWeeklyStageResponse]
     total_cost: Optional[Dict[str, Any]] = None
+    total_cost_usd: Optional[float] = None
 
 
 class AIWeeklyRecentTaskResponse(BaseModel):

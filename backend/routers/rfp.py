@@ -351,16 +351,16 @@ async def _run_rfp_stage(
 
         # Track cost from phase output
         cost_data = output.get("cost", {})
-        if cost_data:
-            prompt_tokens = cost_data.get("prompt_tokens", 0)
-            completion_tokens = cost_data.get("completion_tokens", 0)
-            cost_usd = (prompt_tokens * 0.002 + completion_tokens * 0.008) / 1000
+        prompt_tokens = cost_data.get("prompt_tokens", 0) if cost_data else 0
+        completion_tokens = cost_data.get("completion_tokens", 0) if cost_data else 0
+        cost_usd = (prompt_tokens * 0.002 + completion_tokens * 0.008) / 1000
+        if cost_data and (prompt_tokens or completion_tokens):
             try:
                 cost_repo.record_cost(
-                    parent_run_id=task_id,
+                    run_id=task_id,
                     model=model,
-                    input_tokens=prompt_tokens,
-                    output_tokens=completion_tokens,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
                     cost_usd=cost_usd,
                 )
             except Exception as e:
@@ -379,6 +379,11 @@ async def _run_rfp_stage(
         output_data: Dict[str, Any] = {
             "shared": {**shared_state},
             "artifacts": {"model": model, "n_reviews": n_reviews, "orchestration": "phase-based"},
+            "cost": {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "cost_usd": cost_usd,
+            },
         }
         if shared_key:
             output_data["shared"][shared_key] = result_content
@@ -412,6 +417,12 @@ async def _run_rfp_stage(
                 run.completed_at = datetime.now(timezone.utc)
                 db.commit()
 
+            # Generate cost summary file alongside the stage output files
+            try:
+                _generate_cost_summary(task_id, work_dir, all_stages, cost_repo)
+            except Exception as exc:
+                logger.warning(f"Failed to generate cost summary: {exc}")
+
     except Exception as e:
         logger.error(f"RFP stage {stage_num} failed: {e}", exc_info=True)
         # Write error to console buffer so the UI can display it
@@ -433,6 +444,105 @@ async def _run_rfp_stage(
         sys.stderr = old_stderr
         _running_tasks.pop(f"{task_id}:{stage_num}", None)
         db.close()
+
+
+# =============================================================================
+# Cost summary generator
+# =============================================================================
+
+_STAGE_DISPLAY_NAMES = {
+    1: "Requirements Analysis",
+    2: "Tools & Technology Selection",
+    3: "Cloud & Infrastructure Planning",
+    4: "Implementation Plan",
+    5: "Architecture Design",
+    6: "Execution Strategy",
+    7: "Proposal Compilation",
+}
+
+
+def _generate_cost_summary(task_id: str, work_dir: str, stages, cost_repo) -> str:
+    """Generate a formatted cost_summary.md file with per-stage and total cost breakdown."""
+    lines: List[str] = []
+    lines.append("# RFP Proposal — Cost Summary")
+    lines.append("")
+    lines.append(f"**Task ID:** `{task_id}`")
+    lines.append(f"**Generated:** {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Table header
+    lines.append("## Per-Stage Cost Breakdown")
+    lines.append("")
+    lines.append("| # | Stage | Model | Prompt Tokens | Completion Tokens | Total Tokens | Cost (USD) |")
+    lines.append("|---|-------|-------|--------------|-------------------|-------------|------------|")
+
+    total_prompt = 0
+    total_completion = 0
+    total_tokens = 0
+    total_cost = 0.0
+
+    sorted_stages = sorted(stages, key=lambda s: s.stage_number)
+    for stage in sorted_stages:
+        num = stage.stage_number
+        display = _STAGE_DISPLAY_NAMES.get(num, stage.stage_name or f"Stage {num}")
+        cost_info = {}
+        model_name = "—"
+        if stage.output_data:
+            cost_info = stage.output_data.get("cost", {})
+            artifacts = stage.output_data.get("artifacts", {})
+            model_name = artifacts.get("model", "—")
+
+        pt = cost_info.get("prompt_tokens", 0)
+        ct = cost_info.get("completion_tokens", 0)
+        tt = pt + ct
+        cu = cost_info.get("cost_usd", 0.0)
+
+        total_prompt += pt
+        total_completion += ct
+        total_tokens += tt
+        total_cost += cu
+
+        lines.append(
+            f"| {num} | {display} | {model_name} | "
+            f"{pt:,} | {ct:,} | {tt:,} | ${cu:.4f} |"
+        )
+
+    # Separator + totals row
+    lines.append(f"| | **TOTAL** | | **{total_prompt:,}** | **{total_completion:,}** | **{total_tokens:,}** | **${total_cost:.4f}** |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Summary section
+    lines.append("## Summary")
+    lines.append("")
+    lines.append(f"- **Total Prompt Tokens:** {total_prompt:,}")
+    lines.append(f"- **Total Completion Tokens:** {total_completion:,}")
+    lines.append(f"- **Total Tokens Used:** {total_tokens:,}")
+    lines.append(f"- **Total Cost:** ${total_cost:.4f}")
+    lines.append("")
+
+    # Cross-check with DB cost records
+    try:
+        db_cost = cost_repo.get_task_total_cost(parent_run_id=task_id)
+        if isinstance(db_cost, dict):
+            db_total = db_cost.get("total_cost_usd", 0.0)
+            db_tokens = db_cost.get("total_tokens", 0)
+            if abs(db_total - total_cost) > 0.0001 or db_tokens != total_tokens:
+                lines.append(f"> **Note:** Database totals — ${db_total:.4f} / {db_tokens:,} tokens")
+                lines.append("")
+    except Exception:
+        pass
+
+    content = "\n".join(lines)
+    input_dir = os.path.join(work_dir, "input_files")
+    os.makedirs(input_dir, exist_ok=True)
+    summary_path = os.path.join(input_dir, "cost_summary.md")
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return summary_path
 
 
 # =============================================================================
@@ -922,6 +1032,7 @@ async def download_rfp_artifact(task_id: str, filename: str):
     allowed = {s["file"] for s in STAGE_DEFS if s["file"]}
     allowed.add("proposal.md")
     allowed.add("rfp_context.md")
+    allowed.add("cost_summary.md")
     if filename not in allowed:
         raise HTTPException(status_code=400, detail="Invalid filename")
     db = _get_db()

@@ -139,46 +139,48 @@ export default function AIWeeklyReportTask({ onBack, resumeTaskId }: AIAIWeeklyR
         <div className="p-6 max-w-7xl mx-auto">
             {/* In-progress tasks section */}
             {currentStep === 0 && visibleRecentTasks.length > 0 && (
-                <div className="mb-6 space-y-2">
-                    <h3 className="text-xs font-medium uppercase tracking-wider"
+                <div className="mb-6">
+                    <h3 className="text-xs font-medium uppercase tracking-wider mb-2"
                         style={{ color: 'var(--mars-color-text-tertiary)' }}>
                         In Progress
                     </h3>
-                    {visibleRecentTasks.map((task) => (
-                        <button key={task.task_id} onClick={() => handleResumeRecent(task.task_id)}
-                            className="w-full flex items-center gap-3 p-3 rounded-mars-md border transition-colors hover:border-[var(--mars-color-primary)]"
-                            style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
-                            <div className="flex-shrink-0 w-8 h-8 rounded-mars-md flex items-center justify-center"
-                                style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}>
-                                <Newspaper className="w-4 h-4 text-white" />
-                            </div>
-                            <div className="flex-1 text-left min-w-0">
-                                <p className="text-sm font-medium truncate" style={{ color: 'var(--mars-color-text)' }}>
-                                    AI Weekly Report{task.task ? ` — ${task.task}` : ''}
-                                </p>
-                                <p className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
-                                    {task.current_stage
-                                        ? `Stage ${task.current_stage}: ${AW_STAGE_NAMES[task.current_stage] || ''}`
-                                        : 'Starting...'}
-                                    {' '}&middot;{' '}
-                                    {Math.round(task.progress_percent)}% complete
-                                </p>
-                            </div>
-                            <div className="flex-shrink-0 w-20 h-1.5 rounded-full overflow-hidden"
-                                style={{ backgroundColor: 'var(--mars-color-surface-overlay)' }}>
-                                <div className="h-full rounded-full transition-all"
-                                    style={{ width: `${Math.max(5, task.progress_percent)}%`, background: 'linear-gradient(90deg, #3b82f6, #2563eb)' }} />
-                            </div>
-                            <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--mars-color-text-tertiary)' }} />
-                            <div role="button" tabIndex={0}
-                                onClick={(e) => handleDeleteRecent(task.task_id, e)}
-                                onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteRecent(task.task_id, e as unknown as React.MouseEvent) }}
-                                className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
-                                title="Delete task">
-                                <X className="w-3.5 h-3.5" style={{ color: 'var(--mars-color-text-tertiary)' }} />
-                            </div>
-                        </button>
-                    ))}
+                    <div className="space-y-2" style={{ maxHeight: '320px', overflowY: 'auto' }}>
+                        {visibleRecentTasks.map((task) => (
+                            <button key={task.task_id} onClick={() => handleResumeRecent(task.task_id)}
+                                className="w-full flex items-center gap-3 p-3 rounded-mars-md border transition-colors hover:border-[var(--mars-color-primary)]"
+                                style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
+                                <div className="flex-shrink-0 w-8 h-8 rounded-mars-md flex items-center justify-center"
+                                    style={{ background: 'linear-gradient(135deg, #3b82f6, #2563eb)' }}>
+                                    <Newspaper className="w-4 h-4 text-white" />
+                                </div>
+                                <div className="flex-1 text-left min-w-0">
+                                    <p className="text-sm font-medium truncate" style={{ color: 'var(--mars-color-text)' }}>
+                                        AI Weekly Report{task.task ? ` — ${task.task}` : ''}
+                                    </p>
+                                    <p className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
+                                        {task.current_stage
+                                            ? `Stage ${task.current_stage}: ${AW_STAGE_NAMES[task.current_stage] || ''}`
+                                            : 'Starting...'}
+                                        {' '}&middot;{' '}
+                                        {Math.round(task.progress_percent)}% complete
+                                    </p>
+                                </div>
+                                <div className="flex-shrink-0 w-20 h-1.5 rounded-full overflow-hidden"
+                                    style={{ backgroundColor: 'var(--mars-color-surface-overlay)' }}>
+                                    <div className="h-full rounded-full transition-all"
+                                        style={{ width: `${Math.max(5, task.progress_percent)}%`, background: 'linear-gradient(90deg, #3b82f6, #2563eb)' }} />
+                                </div>
+                                <ArrowRight className="w-4 h-4 flex-shrink-0" style={{ color: 'var(--mars-color-text-tertiary)' }} />
+                                <div role="button" tabIndex={0}
+                                    onClick={(e) => handleDeleteRecent(task.task_id, e)}
+                                    onKeyDown={(e) => { if (e.key === 'Enter') handleDeleteRecent(task.task_id, e as unknown as React.MouseEvent) }}
+                                    className="flex-shrink-0 p-1 rounded transition-colors hover:bg-[var(--mars-color-danger-subtle,rgba(239,68,68,0.1))]"
+                                    title="Delete task">
+                                    <X className="w-3.5 h-3.5" style={{ color: 'var(--mars-color-text-tertiary)' }} />
+                                </div>
+                            </button>
+                        ))}
+                    </div>
                 </div>
             )}
 
@@ -197,8 +199,19 @@ export default function AIWeeklyReportTask({ onBack, resumeTaskId }: AIAIWeeklyR
                         Generate a publication-ready weekly AI report through 4 interactive stages
                     </p>
                 </div>
+                {taskState?.total_cost_usd != null && taskState.total_cost_usd > 0 && (
+                    <div
+                        className="ml-auto text-xs px-3 py-1.5 rounded-mars-md"
+                        style={{
+                            backgroundColor: 'var(--mars-color-surface-overlay)',
+                            color: 'var(--mars-color-text-secondary)',
+                        }}
+                    >
+                        Cost: ${taskState.total_cost_usd.toFixed(4)}
+                    </div>
+                )}
                 {taskId && (
-                    <div className="ml-auto flex items-center gap-2">
+                    <div className={`flex items-center gap-2 ${taskState?.total_cost_usd ? '' : 'ml-auto'}`}>
                         <Button onClick={handleDelete} variant="secondary" size="sm" disabled={isExecuting}>
                             <Trash2 className="w-3.5 h-3.5 mr-1" />Delete
                         </Button>

@@ -3,6 +3,7 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react'
 import { Eye, Edit3, ArrowRight, ArrowLeft, Play, Loader2 } from 'lucide-react'
 import { Button } from '@/components/core'
+import ResizableSplitPane from '@/components/core/ResizableSplitPane'
 import RefinementChat from '@/components/deepresearch/RefinementChat'
 import ExecutionProgress from '@/components/deepresearch/ExecutionProgress'
 import MarkdownRenderer from '@/components/files/MarkdownRenderer'
@@ -130,57 +131,65 @@ export default function AIWeeklyReviewPanel({
 
     // Review — content available
     return (
-        <div className="flex gap-4" style={{ minHeight: '600px' }}>
-            {/* Main editor / preview */}
-            <div className="flex-1 min-w-0 space-y-3">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1">
-                        <button onClick={() => setMode('edit')}
-                            className={`px-3 py-1.5 rounded-mars-sm text-xs font-medium transition-colors ${mode === 'edit' ? 'bg-[var(--mars-color-primary)] text-white' : ''}`}
-                            style={mode !== 'edit' ? { color: 'var(--mars-color-text-secondary)' } : {}}>
-                            <Edit3 className="w-3 h-3 inline mr-1" />Edit
-                        </button>
-                        <button onClick={() => setMode('preview')}
-                            className={`px-3 py-1.5 rounded-mars-sm text-xs font-medium transition-colors ${mode === 'preview' ? 'bg-[var(--mars-color-primary)] text-white' : ''}`}
-                            style={mode !== 'preview' ? { color: 'var(--mars-color-text-secondary)' } : {}}>
-                            <Eye className="w-3 h-3 inline mr-1" />Preview
-                        </button>
+        <ResizableSplitPane
+            className=""
+            style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}
+            defaultRightWidth={320}
+            minRightWidth={200}
+            maxRightWidth={1200}
+            minLeftWidth={200}
+            left={
+                <>
+                    <div className="flex items-center justify-between flex-shrink-0">
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => setMode('edit')}
+                                className={`px-3 py-1.5 rounded-mars-sm text-xs font-medium transition-colors ${mode === 'edit' ? 'bg-[var(--mars-color-primary)] text-white' : ''}`}
+                                style={mode !== 'edit' ? { color: 'var(--mars-color-text-secondary)' } : {}}>
+                                <Edit3 className="w-3 h-3 inline mr-1" />Edit
+                            </button>
+                            <button onClick={() => setMode('preview')}
+                                className={`px-3 py-1.5 rounded-mars-sm text-xs font-medium transition-colors ${mode === 'preview' ? 'bg-[var(--mars-color-primary)] text-white' : ''}`}
+                                style={mode !== 'preview' ? { color: 'var(--mars-color-text-secondary)' } : {}}>
+                                <Eye className="w-3 h-3 inline mr-1" />Preview
+                            </button>
+                        </div>
+                        <span className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
+                            {saveIndicator === 'saving' && 'Saving...'}
+                            {saveIndicator === 'saved' && '✓ Saved'}
+                        </span>
                     </div>
-                    <span className="text-xs" style={{ color: 'var(--mars-color-text-tertiary)' }}>
-                        {saveIndicator === 'saving' && 'Saving...'}
-                        {saveIndicator === 'saved' && '✓ Saved'}
-                    </span>
-                </div>
 
-                {mode === 'edit' ? (
-                    <textarea
-                        value={editableContent}
-                        onChange={e => handleContentChange(e.target.value)}
-                        className="w-full rounded-mars-md border p-4 text-sm font-mono resize-none outline-none"
-                        style={{ backgroundColor: 'var(--mars-color-surface)', borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text)', minHeight: '500px' }}
+                    {mode === 'edit' ? (
+                        <textarea
+                            value={editableContent}
+                            onChange={e => handleContentChange(e.target.value)}
+                            className="w-full rounded-mars-md border p-4 text-sm font-mono resize-none outline-none flex-1 mt-3"
+                            style={{ backgroundColor: 'var(--mars-color-surface)', borderColor: 'var(--mars-color-border)', color: 'var(--mars-color-text)', minHeight: 0 }}
+                        />
+                    ) : (
+                        <div className="rounded-mars-md border p-4 prose prose-sm max-w-none overflow-y-auto flex-1 mt-3"
+                            style={{ backgroundColor: 'var(--mars-color-surface)', borderColor: 'var(--mars-color-border)', minHeight: 0 }}>
+                            <MarkdownRenderer content={editableContent} />
+                        </div>
+                    )}
+
+                    {/* Navigation */}
+                    <div className="flex items-center justify-between pt-2 flex-shrink-0">
+                        <Button onClick={onBack} variant="secondary" size="sm"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
+                        <Button onClick={handleNext} variant="primary" size="sm">Next<ArrowRight className="w-4 h-4 ml-1" /></Button>
+                    </div>
+                </>
+            }
+            right={
+                <div className="border rounded-mars-md overflow-hidden flex flex-col h-full"
+                    style={{ borderColor: 'var(--mars-color-border)', backgroundColor: 'var(--mars-color-surface)' }}>
+                    <RefinementChat
+                        messages={refinementMessages}
+                        onSend={handleRefine}
+                        onApply={handleApply}
                     />
-                ) : (
-                    <div className="rounded-mars-md border p-4 prose prose-sm max-w-none overflow-y-auto"
-                        style={{ backgroundColor: 'var(--mars-color-surface)', borderColor: 'var(--mars-color-border)', minHeight: '500px', maxHeight: '700px' }}>
-                        <MarkdownRenderer content={editableContent} />
-                    </div>
-                )}
-
-                {/* Navigation */}
-                <div className="flex items-center justify-between pt-2">
-                    <Button onClick={onBack} variant="secondary" size="sm"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
-                    <Button onClick={handleNext} variant="primary" size="sm">Next<ArrowRight className="w-4 h-4 ml-1" /></Button>
                 </div>
-            </div>
-
-            {/* Refinement chat (40%) */}
-            <div className="w-[380px] flex-shrink-0">
-                <RefinementChat
-                    messages={refinementMessages}
-                    onSend={handleRefine}
-                    onApply={handleApply}
-                />
-            </div>
-        </div>
+            }
+        />
     )
 }
