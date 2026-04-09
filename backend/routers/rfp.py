@@ -332,10 +332,12 @@ async def _run_rfp_stage(
         print(f"Calling LLM for {stage_name} (this may take a minute)...")
 
         # Execute the phase (generate → review cycle) with a timeout
+        # Large RFP documents may require chunked generation (multiple LLM calls),
+        # so allow up to 1200s to avoid premature timeouts.
         try:
-            result = await asyncio.wait_for(phase.execute(ctx), timeout=600)
+            result = await asyncio.wait_for(phase.execute(ctx), timeout=1200)
         except asyncio.TimeoutError:
-            raise RuntimeError(f"Stage {stage_name} timed out after 600 seconds")
+            raise RuntimeError(f"Stage {stage_name} timed out after 1200 seconds")
 
         if result.status.value != "completed":
             raise RuntimeError(result.error or f"Phase {stage_name} failed")

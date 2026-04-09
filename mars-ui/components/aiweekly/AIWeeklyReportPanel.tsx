@@ -1,7 +1,7 @@
 'use client'
 
-import React, { useEffect, useState } from 'react'
-import { ArrowLeft, Download, CheckCircle, Play, FileText, Eye, FileDown } from 'lucide-react'
+import React, { useEffect, useState, useRef, useCallback } from 'react'
+import { ArrowLeft, Download, CheckCircle, Play, FileText, Eye, FileDown, X, Maximize2, Minimize2 } from 'lucide-react'
 import { Button } from '@/components/core'
 import ExecutionProgress from '@/components/deepresearch/ExecutionProgress'
 import MarkdownRenderer from '@/components/files/MarkdownRenderer'
@@ -21,11 +21,40 @@ export default function AIWeeklyReportPanel({ hook, stageNum, onBack }: AIWeekly
     } = hook
 
     const [contentLoaded, setContentLoaded] = useState(false)
+    const [showFullView, setShowFullView] = useState(false)
+    const [previewMaximized, setPreviewMaximized] = useState(false)
+    const [previewSize, setPreviewSize] = useState({ width: 900, height: 700 })
+    const resizingRef = useRef(false)
+    const startPosRef = useRef({ x: 0, y: 0, w: 0, h: 0 })
 
     const stage = taskState?.stages.find(s => s.stage_number === stageNum)
     const isCompleted = stage?.status === 'completed'
     const isFailed = stage?.status === 'failed'
     const isNotStarted = stage?.status === 'pending'
+
+    // Resize handlers for the preview modal
+    const handleResizeStart = useCallback((e: React.MouseEvent) => {
+        e.preventDefault()
+        resizingRef.current = true
+        startPosRef.current = { x: e.clientX, y: e.clientY, w: previewSize.width, h: previewSize.height }
+
+        const handleResizeMove = (ev: MouseEvent) => {
+            if (!resizingRef.current) return
+            const dx = ev.clientX - startPosRef.current.x
+            const dy = ev.clientY - startPosRef.current.y
+            setPreviewSize({
+                width: Math.max(600, startPosRef.current.w + dx),
+                height: Math.max(400, startPosRef.current.h + dy),
+            })
+        }
+        const handleResizeEnd = () => {
+            resizingRef.current = false
+            document.removeEventListener('mousemove', handleResizeMove)
+            document.removeEventListener('mouseup', handleResizeEnd)
+        }
+        document.addEventListener('mousemove', handleResizeMove)
+        document.addEventListener('mouseup', handleResizeEnd)
+    }, [previewSize])
 
     useEffect(() => {
         if (isCompleted && !contentLoaded) {
@@ -100,11 +129,14 @@ export default function AIWeeklyReportPanel({ hook, stageNum, onBack }: AIWeekly
             <div className="flex items-center gap-3">
                 {taskId && (
                     <>
-                        <a href={getApiUrl(`/api/aiweekly/${taskId}/download/report_final.md`)} download>
-                            <Button variant="primary" size="sm"><Download className="w-4 h-4 mr-1.5" />Download MD</Button>
-                        </a>
                         <a href={getApiUrl(`/api/aiweekly/${taskId}/download-pdf/report_final.md`)} download>
-                            <Button variant="secondary" size="sm"><FileDown className="w-4 h-4 mr-1.5" />Download PDF</Button>
+                            <Button variant="primary" size="sm"><Download className="w-4 h-4 mr-1.5" />Download PDF</Button>
+                        </a>
+                        <Button onClick={() => setShowFullView(true)} variant="secondary" size="sm">
+                            <Eye className="w-4 h-4 mr-1.5" />View Online
+                        </Button>
+                        <a href={getApiUrl(`/api/aiweekly/${taskId}/download/report_final.md`)} download>
+                            <Button variant="secondary" size="sm"><FileDown className="w-4 h-4 mr-1.5" />Download MD</Button>
                         </a>
                     </>
                 )}
@@ -141,6 +173,76 @@ export default function AIWeeklyReportPanel({ hook, stageNum, onBack }: AIWeekly
             <div className="flex justify-start">
                 <Button onClick={onBack} variant="secondary" size="sm"><ArrowLeft className="w-4 h-4 mr-1" />Back</Button>
             </div>
+
+            {/* Resizable PDF Preview modal */}
+            {showFullView && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center"
+                    style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}
+                    onClick={() => setShowFullView(false)}
+                >
+                    <div
+                        className="relative flex flex-col rounded-lg shadow-2xl overflow-hidden"
+                        style={{
+                            backgroundColor: '#ffffff',
+                            width: previewMaximized ? '100vw' : `${previewSize.width}px`,
+                            height: previewMaximized ? '100vh' : `${previewSize.height}px`,
+                            maxWidth: '100vw',
+                            maxHeight: '100vh',
+                            borderRadius: previewMaximized ? 0 : '8px',
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Modal header */}
+                        <div
+                            className="flex items-center justify-between px-5 py-3 border-b"
+                            style={{ borderColor: '#e2e8f0', backgroundColor: '#f8fafc' }}
+                        >
+                            <h2 className="text-base font-semibold" style={{ color: '#1a202c' }}>
+                                AI Weekly Report — PDF Preview
+                            </h2>
+                            <div className="flex items-center gap-2">
+                                {taskId && (
+                                    <a href={getApiUrl(`/api/aiweekly/${taskId}/download-pdf/report_final.md`)} download="AI_Weekly_Report.pdf">
+                                        <Button variant="primary" size="sm">
+                                            <Download className="w-3.5 h-3.5 mr-1" />PDF
+                                        </Button>
+                                    </a>
+                                )}
+                                <Button onClick={() => setPreviewMaximized(!previewMaximized)} variant="secondary" size="sm">
+                                    {previewMaximized ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                                </Button>
+                                <Button onClick={() => setShowFullView(false)} variant="secondary" size="sm">
+                                    <X className="w-4 h-4" />
+                                </Button>
+                            </div>
+                        </div>
+                        {/* Modal body — PDF iframe */}
+                        <div className="flex-1 overflow-hidden" style={{ backgroundColor: '#ffffff' }}>
+                            {taskId ? (
+                                <iframe
+                                    src={getApiUrl(`/api/aiweekly/${taskId}/download-pdf/report_final.md?inline=true`) + '#toolbar=1&navpanes=0'}
+                                    className="w-full h-full border-0"
+                                    style={{ backgroundColor: '#ffffff' }}
+                                    title="AI Weekly Report PDF Preview"
+                                />
+                            ) : (
+                                <div className="flex items-center justify-center h-full text-sm" style={{ color: '#718096' }}>
+                                    No report available to preview
+                                </div>
+                            )}
+                        </div>
+                        {/* Resize handle */}
+                        {!previewMaximized && (
+                            <div
+                                className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize"
+                                style={{ background: 'linear-gradient(135deg, transparent 50%, #a0aec0 50%)', borderRadius: '0 0 8px 0' }}
+                                onMouseDown={handleResizeStart}
+                            />
+                        )}
+                    </div>
+                </div>
+            )}
         </div>
     )
 }

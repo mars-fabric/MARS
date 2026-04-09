@@ -9,6 +9,7 @@ Phase-based pipeline:
 """
 
 import asyncio
+import mimetypes
 import os
 import sys
 import threading
@@ -862,13 +863,27 @@ async def download_aiweekly_artifact(task_id: str, filename: str):
 
         work_dir = (run.meta or {}).get("work_dir", "")
         file_path = os.path.join(work_dir, "input_files", filename)
+
+        # If cost_summary.md is missing, try to regenerate it on-demand
+        if not os.path.isfile(file_path) and filename == "cost_summary.md":
+            try:
+                from cmbagent.database.models import TaskStage
+                all_stages = db.query(TaskStage).filter(
+                    TaskStage.parent_run_id == task_id
+                ).all()
+                if all_stages:
+                    _generate_cost_summary(task_id, work_dir, all_stages)
+            except Exception:
+                pass
+
         if not os.path.isfile(file_path):
             raise HTTPException(404, "File not found")
 
+        mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
         return FileResponse(
             file_path,
             filename=filename,
-            media_type="application/octet-stream",
+            media_type=mime_type,
         )
     finally:
         db.close()
@@ -915,8 +930,11 @@ ul, ol {{ padding-left: 18pt; }}
 
 
 @router.get("/{task_id}/download-pdf/{filename}")
-async def download_aiweekly_artifact_pdf(task_id: str, filename: str):
-    """Download a report file converted to PDF."""
+async def download_aiweekly_artifact_pdf(task_id: str, filename: str, inline: bool = False):
+    """Download a report file converted to PDF.
+
+    Pass ?inline=true to serve for in-browser preview (Content-Disposition: inline).
+    """
     from cmbagent.database.models import WorkflowRun
     from cmbagent.database.base import get_db_session
 
@@ -942,10 +960,11 @@ async def download_aiweekly_artifact_pdf(task_id: str, filename: str):
 
         _md_to_pdf(md_path, pdf_path)
 
+        disposition = f'inline; filename="{pdf_filename}"' if inline else f'attachment; filename="{pdf_filename}"'
         return FileResponse(
             pdf_path,
-            filename=pdf_filename,
             media_type="application/pdf",
+            headers={"Content-Disposition": disposition},
         )
     finally:
         db.close()
