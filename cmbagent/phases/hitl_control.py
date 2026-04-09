@@ -27,6 +27,7 @@ import logging
 import structlog
 
 from cmbagent.phases.base import Phase, PhaseConfig, PhaseContext, PhaseResult, PhaseStatus
+from cmbagent.phases.control import _truncate_step_summaries
 from cmbagent.phases.execution_manager import PhaseExecutionManager
 from cmbagent.utils import get_model_config, default_agents_llm_model
 
@@ -408,8 +409,8 @@ class HITLControlPhase(Phase):
                                                 if not s.startswith(f"### Step {step_num}\n")
                                             ]
                                             step_summaries.append(summary)
-                                            cmbagent.final_context['previous_steps_execution_summary'] = "\n\n".join(
-                                                s if isinstance(s, str) else str(s) for s in step_summaries
+                                            cmbagent.final_context['previous_steps_execution_summary'] = _truncate_step_summaries(
+                                                step_summaries
                                             )
                                             break
 

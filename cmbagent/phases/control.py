@@ -28,6 +28,79 @@ logger = logging.getLogger(__name__)
 
 from cmbagent.phases.base import Phase, PhaseConfig, PhaseContext, PhaseResult, PhaseStatus
 from cmbagent.phases.execution_manager import PhaseExecutionManager
+
+
+# ---------------------------------------------------------------------------
+# Context-window guard: compress old step summaries to avoid exceeding the
+# model's token limit when the accumulated previous_steps_execution_summary
+# is injected into every agent's system prompt.
+# ---------------------------------------------------------------------------
+_MAX_SUMMARY_CHARS = 60_000       # ~15k tokens – safe headroom for 128k models
+_RECENT_STEPS_FULL = 3            # keep the last N steps verbatim
+_COMPRESSED_LINE_MAX_CHARS = 300  # max chars per compressed old-step line
+
+
+def _truncate_step_summaries(step_summaries: list[str]) -> str:
+    """Return a bounded version of the joined step summaries.
+
+    * The most recent ``_RECENT_STEPS_FULL`` summaries are kept in full.
+    * Older summaries are compressed to their first ``_COMPRESSED_LINE_MAX_CHARS``
+      characters (roughly the first paragraph / heading).
+    * If the result still exceeds ``_MAX_SUMMARY_CHARS`` it is hard-truncated
+      from the front (oldest content removed first).
+    """
+    if not step_summaries:
+        return "\n"
+
+    n = len(step_summaries)
+    parts: list[str] = []
+
+    for idx, summary in enumerate(step_summaries):
+        is_recent = idx >= n - _RECENT_STEPS_FULL
+        if is_recent:
+            parts.append(summary)
+        else:
+            # Keep only the heading / first meaningful line
+            compressed = summary[:_COMPRESSED_LINE_MAX_CHARS].rstrip()
+            if len(summary) > _COMPRESSED_LINE_MAX_CHARS:
+                compressed += " ... [truncated]"
+            parts.append(compressed)
+
+    joined = "\n\n".join(parts)
+
+    # Hard cap – drop oldest content so the newest context survives
+    if len(joined) > _MAX_SUMMARY_CHARS:
+        joined = (
+            "[Earlier steps truncated to fit context window]\n\n"
+            + joined[-_MAX_SUMMARY_CHARS:]
+        )
+
+    return joined
+
+
+# Keys whose values are large but transient – safe to cap between steps.
+_CONTEXT_LARGE_VALUE_CAP = 20_000   # chars (~5k tokens)
+_CONTEXT_KEYS_TO_RESET = {
+    # Chat artefacts that get rebuilt each step
+    'chat_history', 'messages', 'last_message',
+}
+
+
+def _prune_carryover_context(ctx: dict) -> None:
+    """In-place prune of a context dict to limit token growth between steps."""
+    for key in _CONTEXT_KEYS_TO_RESET:
+        if key in ctx:
+            ctx[key] = None
+
+    for key, value in list(ctx.items()):
+        if key == 'previous_steps_execution_summary':
+            continue  # already handled by _truncate_step_summaries
+        if isinstance(value, str) and len(value) > _CONTEXT_LARGE_VALUE_CAP:
+            ctx[key] = value[:_CONTEXT_LARGE_VALUE_CAP] + "\n... [value truncated for context window safety]"
+        elif isinstance(value, list) and len(value) > 200:
+            ctx[key] = value[-100:]  # keep only the most recent items
+
+
 from cmbagent.utils import get_model_config, default_agents_llm_model
 
 
@@ -334,7 +407,7 @@ class ControlPhase(Phase):
                             this_step_summary = msg['content']
                             summary = f"### Step {step}\n{this_step_summary.strip()}"
                             step_summaries.append(summary)
-                            cmbagent.final_context['previous_steps_execution_summary'] = "\n\n".join(step_summaries)
+                            cmbagent.final_context['previous_steps_execution_summary'] = _truncate_step_summaries(step_summaries)
                             break
 
                 # Log agent messages from chat history
@@ -365,8 +438,10 @@ class ControlPhase(Phase):
                 })
                 all_chat_history.extend(cmbagent.chat_result.chat_history)
 
-                # Update context for next step
+                # Update context for next step – prune large transient fields
+                # to prevent unbounded growth across steps.
                 current_context = copy.deepcopy(cmbagent.final_context)
+                _prune_carryover_context(current_context)
 
                 # Save step context (filter non-picklable items)
                 context_path = os.path.join(context_dir, f"context_step_{step}.pkl")

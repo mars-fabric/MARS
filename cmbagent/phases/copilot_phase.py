@@ -28,6 +28,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from cmbagent.phases.base import Phase, PhaseConfig, PhaseContext, PhaseResult, PhaseStatus
+from cmbagent.phases.control import _truncate_step_summaries
 from cmbagent.phases.execution_manager import PhaseExecutionManager
 from cmbagent.utils import get_model_config, CORE_AGENTS
 
@@ -772,7 +773,7 @@ Please provide more details or clarify your request.
                 step_summaries.append(summary)
 
                 execution_context = copy.deepcopy(step_result)
-                execution_context['previous_steps_execution_summary'] = "\n\n".join(step_summaries)
+                execution_context['previous_steps_execution_summary'] = _truncate_step_summaries(step_summaries)
 
             except Exception as e:
                 success = False
