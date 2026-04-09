@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { getApiUrl, getWsUrl, config } from '@/lib/config'
+import { apiFetchWithRetry } from '@/lib/fetchWithRetry'
 import type {
     RfpTaskState,
     RfpStageContent,
@@ -88,10 +89,7 @@ export function useRfpTask(): UseRfpTaskReturn {
     // ---- API helpers ----
 
     const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
-        const resp = await fetch(getApiUrl(path), {
-            headers: { 'Content-Type': 'application/json' },
-            ...options,
-        })
+        const resp = await apiFetchWithRetry(path, options)
         if (!resp.ok) {
             const body = await resp.json().catch(() => ({ detail: resp.statusText }))
             throw new Error(body.detail || `HTTP ${resp.status}`)

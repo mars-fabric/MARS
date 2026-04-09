@@ -1,7 +1,8 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { getApiUrl, getWsUrl, config } from '@/lib/config'
+import { getWsUrl, config } from '@/lib/config'
+import { apiFetchWithRetry } from '@/lib/fetchWithRetry'
 import type {
     AIWeeklyTaskState,
     AIWeeklyCreateResponse,
@@ -12,9 +13,9 @@ import type {
 } from '@/types/aiweekly'
 
 const apiFetch = async (url: string, options?: RequestInit) => {
-    const resp = await fetch(getApiUrl(url), {
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
+    const resp = await apiFetchWithRetry(url, {
         ...options,
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
     })
     if (!resp.ok) throw new Error(`API ${resp.status}: ${await resp.text()}`)
     return resp.json()
@@ -216,13 +217,13 @@ export function useAIWeeklyTask(): UseAIWeeklyTaskReturn {
 
     const refineContent = useCallback(async (stageNum: number, message: string, content: string) => {
         if (!taskId) return null
-        setRefinementMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'user', content: message, timestamp: Date.now() }])
+        setRefinementMessages(prev => [...prev, { id: (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36)), role: 'user', content: message, timestamp: Date.now() }])
         try {
             const resp: AIWeeklyRefineResponse = await apiFetch(`/api/aiweekly/${taskId}/stages/${stageNum}/refine`, {
                 method: 'POST',
                 body: JSON.stringify({ message, content }),
             })
-            setRefinementMessages(prev => [...prev, { id: crypto.randomUUID(), role: 'assistant', content: resp.refined_content, timestamp: Date.now() }])
+            setRefinementMessages(prev => [...prev, { id: (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2) + Date.now().toString(36)), role: 'assistant', content: resp.refined_content, timestamp: Date.now() }])
             return resp.refined_content
         } catch (e: any) {
             setError(e.message)

@@ -4,7 +4,7 @@
  */
 
 // Derive the API base URL once (used for both REST and WebSocket fallback)
-const _apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
+const _apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 export const config = {
   // API URL for REST endpoints

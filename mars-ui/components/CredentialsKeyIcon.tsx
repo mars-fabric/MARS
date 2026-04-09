@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { Key, RefreshCw, AlertCircle } from 'lucide-react';
-import { getApiUrl } from '@/lib/config';
+import { apiFetchWithRetry } from '@/lib/fetchWithRetry';
 
 interface CredentialTest {
   provider: string;
@@ -41,7 +41,7 @@ export const CredentialsKeyIcon: React.FC<CredentialsKeyIconProps> = ({
   const fetchCredentialsStatus = async () => {
     try {
       setLoading(true);
-      const response = await fetch(getApiUrl('/api/credentials/status'));
+      const response = await apiFetchWithRetry('/api/credentials/status');
       if (response.ok) {
         const data: StatusResponse = await response.json();
         setStatus(data);

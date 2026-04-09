@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { getApiUrl } from '@/lib/config'
-import { config } from '@/lib/config'
+import { getApiUrl, config } from '@/lib/config'
+import { apiFetchWithRetry } from '@/lib/fetchWithRetry'
 import type {
   ReleaseNotesTaskState,
   ReleaseNotesStageContent,
@@ -79,10 +79,7 @@ export function useReleaseNotesTask(): UseReleaseNotesTaskReturn {
   // ---- API helpers ----
 
   const apiFetch = useCallback(async (path: string, options?: RequestInit) => {
-    const resp = await fetch(getApiUrl(path), {
-      headers: { 'Content-Type': 'application/json' },
-      ...options,
-    })
+    const resp = await apiFetchWithRetry(path, options)
     if (!resp.ok) {
       const body = await resp.json().catch(() => ({ detail: resp.statusText }))
       throw new Error(body.detail || `HTTP ${resp.status}`)
