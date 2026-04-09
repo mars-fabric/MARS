@@ -10,9 +10,7 @@ export const config = {
   // API URL for REST endpoints
   apiUrl: _apiBase,
 
-  // WebSocket URL — if NEXT_PUBLIC_WS_URL is not set, derive from apiUrl
-  // so both ports always share the same host:port (no separate env var needed).
-  // e.g. http://EC2-IP:8001 → ws://EC2-IP:8001
+  // WebSocket URL — derived from apiUrl (http→ws, https→wss)
   wsUrl: process.env.NEXT_PUBLIC_WS_URL || _apiBase.replace(/^https?/, m => m === 'https' ? 'wss' : 'ws'),
 
   // Work directory for task outputs and logs
@@ -41,36 +39,40 @@ export function getApiUrl(endpoint: string): string {
 /**
  * Get the full WebSocket URL for a given endpoint.
  *
- * In the browser we can't use `localhost` because that resolves to the user's
- * own machine, not the EC2 server. Instead we:
- *   1. Use NEXT_PUBLIC_WS_URL directly if it is explicitly set.
- *   2. Parse NEXT_PUBLIC_API_URL for the backend port, then substitute
- *      window.location.hostname (the real server IP/domain) so the WS
- *      connection lands on the same host the browser is already talking to.
- *   3. Fall back to window.location.host (same-origin) if nothing is set.
+ * Both NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL are set to "localhost:8001"
+ * on the server (so the backend can talk to itself). But when this code runs
+ * in the user's browser, "localhost" means the user's own machine — not EC2.
+ *
+ * Strategy:
+ *   1. Determine the backend port from NEXT_PUBLIC_WS_URL or NEXT_PUBLIC_API_URL.
+ *   2. Always use window.location.hostname (the real EC2 IP/domain the browser
+ *      is already talking to) when the configured host is localhost/127.0.0.1.
+ *   3. On the server side, use the config value as-is.
  */
 export function getWsUrl(endpoint: string): string {
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
   if (typeof window !== 'undefined') {
-    // Explicit WS override — trust it completely
-    if (process.env.NEXT_PUBLIC_WS_URL) {
-      return `${process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, '')}${path}`;
-    }
+    // Pick the best available base URL (WS env var preferred, then API env var)
+    const rawBase =
+      process.env.NEXT_PUBLIC_WS_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      'ws://localhost:8001';
 
-    // Derive from NEXT_PUBLIC_API_URL: keep the port, use the real browser hostname
-    const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
     try {
-      const url = new URL(apiBase || 'http://localhost:8001');
+      // Normalise to a URL object (replace ws/wss with http/https for URL parser)
+      const normalised = rawBase.replace(/^wss?:\/\//, 'http://');
+      const parsed = new URL(normalised);
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      // If API URL uses localhost/127.0.0.1 (a server-side convenience value),
-      // replace it with the hostname the browser used to reach the page.
-      const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-      const host = isLocal ? window.location.hostname : url.hostname;
-      const port = url.port;
-      return `${protocol}//${host}${port ? ':' + port : ''}${path}`;
+
+      // Replace localhost/127.0.0.1 with the real server hostname
+      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
+      const hostname = isLocal ? window.location.hostname : parsed.hostname;
+      const port = parsed.port; // e.g. "8001"
+
+      return `${protocol}//${hostname}${port ? ':' + port : ''}${path}`;
     } catch {
-      // Absolute fallback: same origin as the page
+      // Fallback: same origin as the page
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${protocol}//${window.location.host}${path}`;
     }
