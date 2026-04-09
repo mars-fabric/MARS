@@ -167,6 +167,8 @@ def _call_llm_direct(
     last_err: Optional[Exception] = None
     # Track whether the model needs max_completion_tokens instead of max_tokens
     use_completion_tokens = _USE_MAX_COMPLETION_TOKENS
+    # Track whether the model supports custom temperature
+    skip_temperature = _SKIP_TEMPERATURE
 
     for attempt in range(1, _MAX_LLM_RETRIES + 1):
         try:
@@ -179,8 +181,9 @@ def _call_llm_direct(
             kwargs: Dict[str, Any] = {
                 "model": model,
                 "messages": messages,
-                "temperature": temperature,
             }
+            if not skip_temperature:
+                kwargs["temperature"] = temperature
             if use_completion_tokens:
                 kwargs["max_completion_tokens"] = max_tokens
             else:
@@ -203,6 +206,12 @@ def _call_llm_direct(
                 use_completion_tokens = False
                 _set_use_max_completion_tokens(False)
                 continue
+            # Auto-detect unsupported temperature and retry without it
+            if "temperature" in err_str and "unsupported" in err_str.lower() and not skip_temperature:
+                logger.info("Model does not support custom temperature — retrying without it")
+                skip_temperature = True
+                _set_skip_temperature(True)
+                continue  # retry immediately, don't count this attempt
             last_err = e
             logger.warning("PDA LLM attempt %d failed: %s", attempt, e)
             if attempt < _MAX_LLM_RETRIES:
@@ -216,9 +225,17 @@ def _call_llm_direct(
 # Auto-detected on the first error, then cached for subsequent calls.
 _USE_MAX_COMPLETION_TOKENS = True  # default to newer param (max_completion_tokens)
 
+# Module-level flag to remember if the model supports custom temperature.
+# Some models (e.g. gpt-5.3) only allow the default temperature (1).
+_SKIP_TEMPERATURE = False
+
 def _set_use_max_completion_tokens(val: bool):
     global _USE_MAX_COMPLETION_TOKENS
     _USE_MAX_COMPLETION_TOKENS = val
+
+def _set_skip_temperature(val: bool):
+    global _SKIP_TEMPERATURE
+    _SKIP_TEMPERATURE = val
 
 
 def _call_cmbagent_researcher(task: str, work_dir: Optional[str] = None) -> Optional[str]:
