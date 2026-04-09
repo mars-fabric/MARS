@@ -323,10 +323,6 @@ def resolve_model_for_provider(model: str) -> str:
 # Auto-detected on first error, then cached for the process lifetime.
 _USE_MAX_COMPLETION_TOKENS: bool = True  # default to newer param
 
-# Module-level flag: remembers if the model supports custom temperature.
-# Some models (e.g. gpt-5.3) only allow the default temperature (1).
-_SKIP_TEMPERATURE: bool = False
-
 def _set_token_param_flag(val: bool):
     global _USE_MAX_COMPLETION_TOKENS
     _USE_MAX_COMPLETION_TOKENS = val
@@ -362,16 +358,14 @@ def safe_completion(
     client = create_openai_client()
     resolved_model = resolve_model_for_provider(model)
     use_completion_tokens = _USE_MAX_COMPLETION_TOKENS
-    skip_temperature = _SKIP_TEMPERATURE
 
-    for _attempt in range(3):
+    for _attempt in range(2):
         kwargs: Dict[str, Any] = {
             "model": resolved_model,
             "messages": messages,
+            "temperature": temperature,
             **extra_kwargs,
         }
-        if not skip_temperature:
-            kwargs["temperature"] = temperature
         if use_completion_tokens:
             kwargs["max_completion_tokens"] = max_tokens
         else:
@@ -391,13 +385,7 @@ def safe_completion(
                     "max_completion_tokens" if use_completion_tokens else "max_tokens",
                 )
                 continue
-            # Detect unsupported temperature value
-            if "temperature" in err_str and "unsupported" in err_str and not skip_temperature:
-                skip_temperature = True
-                _SKIP_TEMPERATURE = True
-                logger.info("Temperature not supported by model — retrying without it")
-                continue
-            # Not a recoverable error — propagate immediately
+            # Not a token-param error — propagate immediately
             raise
 
-    raise RuntimeError("LLM call failed after auto-detection retries")
+    raise RuntimeError("LLM call failed after token-param auto-detection retry")
