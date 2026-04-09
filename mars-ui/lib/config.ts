@@ -39,43 +39,22 @@ export function getApiUrl(endpoint: string): string {
 /**
  * Get the full WebSocket URL for a given endpoint.
  *
- * Both NEXT_PUBLIC_API_URL and NEXT_PUBLIC_WS_URL are set to "localhost:8001"
- * on the server (so the backend can talk to itself). But when this code runs
- * in the user's browser, "localhost" means the user's own machine — not EC2.
+ * WebSocket connections are proxied through Next.js rewrites (same origin),
+ * so the browser connects to the Next.js server, which forwards to the backend.
+ * This avoids cross-port/firewall issues.
  *
- * Strategy:
- *   1. Determine the backend port from NEXT_PUBLIC_WS_URL or NEXT_PUBLIC_API_URL.
- *   2. Always use window.location.hostname (the real EC2 IP/domain the browser
- *      is already talking to) when the configured host is localhost/127.0.0.1.
- *   3. On the server side, use the config value as-is.
+ * In the browser: use same-origin WebSocket (ws/wss based on page protocol,
+ * same hostname and port as the page).
+ * On the server side: use the configured WS URL directly.
  */
 export function getWsUrl(endpoint: string): string {
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
 
   if (typeof window !== 'undefined') {
-    // Pick the best available base URL (WS env var preferred, then API env var)
-    const rawBase =
-      process.env.NEXT_PUBLIC_WS_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      'ws://localhost:8001';
-
-    try {
-      // Normalise to a URL object (replace ws/wss with http/https for URL parser)
-      const normalised = rawBase.replace(/^wss?:\/\//, 'http://');
-      const parsed = new URL(normalised);
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-
-      // Replace localhost/127.0.0.1 with the real server hostname
-      const isLocal = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-      const hostname = isLocal ? window.location.hostname : parsed.hostname;
-      const port = parsed.port; // e.g. "8001"
-
-      return `${protocol}//${hostname}${port ? ':' + port : ''}${path}`;
-    } catch {
-      // Fallback: same origin as the page
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${protocol}//${window.location.host}${path}`;
-    }
+    // Route through Next.js proxy (same origin) — the /ws/* rewrite in
+    // next.config.js forwards to the backend, avoiding direct cross-port access.
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${protocol}//${window.location.host}${path}`;
   }
 
   // Server-side (SSR): use the configured WS URL directly
