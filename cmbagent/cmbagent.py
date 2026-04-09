@@ -950,6 +950,9 @@ class CMBAgent:
                 compacted += message_payload[-tail_len:]
             return compacted, True
 
+        # Track last error so we can raise it if all retries are exhausted
+        _last_error = None
+
         for attempt in range(1, max_retries + 1):
             try:
                 chat_result, context_variables, last_agent = initiate_group_chat(
@@ -958,8 +961,10 @@ class CMBAgent:
                     # user_agent=self.get_agent_from_name("admin"),
                     max_rounds = max_rounds,
                 )
+                _last_error = None
                 break  # success
             except (RateLimitError, APITimeoutError, APIConnectionError, BadRequestError) as e:
+                _last_error = e
                 error_text = str(e)
                 token_match = re.search(r"Limit\s+(\d+),\s+Requested\s+(\d+)", error_text)
                 is_request_too_large = (
@@ -977,6 +982,12 @@ class CMBAgent:
                     # shared context fields (previous_steps_execution_summary
                     # is the typical offender).
                     if is_context_length_exceeded:
+                        if attempt == max_retries:
+                            self.logger.error(
+                                "Context length exceeded after %d attempts, giving up: %s",
+                                max_retries, e,
+                            )
+                            raise
                         self.logger.warning(
                             "Context length exceeded (attempt %d/%d). "
                             "Aggressively compacting shared context.",
@@ -1031,6 +1042,13 @@ class CMBAgent:
                     attempt, max_retries, delay, e,
                 )
                 time.sleep(delay)
+        else:
+            # for-loop exhausted without break (all retries failed via continue)
+            if _last_error is not None:
+                self.logger.error(
+                    "All %d retry attempts exhausted: %s", max_retries, _last_error
+                )
+                raise _last_error
 
         self.final_context = copy.deepcopy(context_variables)
 
