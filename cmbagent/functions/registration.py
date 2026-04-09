@@ -30,6 +30,7 @@ _DIR_BLACKLIST_FRAGMENTS = (
     '.venv', 'venv/', '__pycache__', 'node_modules', '.git/',
     '.tox', '.mypy_cache', '.pytest_cache', '/dist/', '/build/',
     '.eggs', '.egg-info', '.cache', '.npm', '.yarn',
+    'site-packages/', '.next/', '.nuxt/',
 )
 
 
@@ -93,6 +94,46 @@ def _safe_tool_wrapper(tool_func, tool_name: str = ""):
     if hasattr(tool_func, '__annotations__'):
         _wrapped.__annotations__ = tool_func.__annotations__
     return _wrapped
+
+
+def _patch_ag2_tool_func(tool) -> None:
+    """Monkey-patch an AG2 Tool object's internal ``_func`` so its output
+    goes through directory filtering + size capping.
+
+    This preserves the Tool's name, schema, and registration metadata
+    while intercepting the actual callable at the lowest level.
+    """
+    original_func = tool._func
+    tool_name = getattr(tool, 'name', '') or ''
+
+    @wraps(original_func)
+    def _guarded(*args, **kwargs):
+        result = original_func(*args, **kwargs)
+
+        if not isinstance(result, str):
+            if isinstance(result, (dict, list)):
+                try:
+                    result = json.dumps(result, ensure_ascii=False, default=str)
+                except (TypeError, ValueError):
+                    result = str(result)
+            else:
+                result = str(result)
+
+        # Filter .venv/.git/node_modules noise from directory tools
+        name_lower = tool_name.lower()
+        if any(kw in name_lower for kw in (
+            'directory', 'list_dir', 'listdir', 'read_directory',
+        )):
+            lines = result.splitlines()
+            lines = [
+                l for l in lines
+                if not any(bl in l.lower() for bl in _DIR_BLACKLIST_FRAGMENTS)
+            ]
+            result = "\n".join(lines)
+
+        return _cap_output(result, tool_name)
+
+    tool._func = _guarded
 
 
 def register_functions_to_agents(cmbagent_instance):
@@ -180,9 +221,9 @@ def register_functions_to_agents(cmbagent_instance):
                 # Register tools for execution with executor.
                 #
                 # AG2 Interop Tool objects (Wikipedia, ArXiv, CrewAI tools, etc.)
-                # are registered as-is to preserve their internal metadata and
-                # AG2's name-matching between register_for_llm ↔ register_for_execution.
-                # Their output is capped at the message level by MessageContentTruncator.
+                # have their internal _func monkey-patched via _patch_ag2_tool_func
+                # so output goes through directory filtering + size capping at source,
+                # while preserving tool name/schema/registration metadata.
                 #
                 # Raw callables (news tools, duckduckgo, etc.) are wrapped with
                 # _safe_tool_wrapper to convert dict→compact JSON + size cap at source.
@@ -194,7 +235,8 @@ def register_functions_to_agents(cmbagent_instance):
                 try:
                     for tool in combined_tools:
                         if _AG2Tool is not None and isinstance(tool, _AG2Tool):
-                            # AG2 Tool objects: register natively
+                            # Patch the AG2 Tool's internal function for output safety
+                            _patch_ag2_tool_func(tool)
                             executor.register_for_execution()(tool)
                         else:
                             # Raw callables: wrap for dict→JSON + size cap

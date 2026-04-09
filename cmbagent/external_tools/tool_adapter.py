@@ -25,6 +25,7 @@ _DIR_EXCLUDE_PATTERNS = {
     '.venv', 'venv', '__pycache__', 'node_modules', '.git',
     '.tox', '.mypy_cache', '.pytest_cache', 'dist', 'build',
     '.eggs', '*.egg-info', '.cache', '.npm', '.yarn',
+    'site-packages', '.next', '.nuxt',
 }
 
 

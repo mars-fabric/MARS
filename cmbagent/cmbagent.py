@@ -953,6 +953,12 @@ class CMBAgent:
         # Track last error so we can raise it if all retries are exhausted
         _last_error = None
 
+        # Initialize to None so we never hit UnboundLocalError regardless of
+        # which exception path triggers.  These are set on success inside the
+        # try block and checked after the loop.
+        chat_result = None
+        last_agent = None
+
         for attempt in range(1, max_retries + 1):
             try:
                 chat_result, context_variables, last_agent = initiate_group_chat(
@@ -1042,6 +1048,16 @@ class CMBAgent:
                     attempt, max_retries, delay, e,
                 )
                 time.sleep(delay)
+            except Exception as e:
+                # Catch ANY other exception from initiate_group_chat (ValueError,
+                # RuntimeError, TypeError, etc. from AG2 internals).  Without
+                # this, uncaught exceptions exit the for-loop and leave
+                # last_agent / chat_result unbound.
+                self.logger.error(
+                    "Unexpected error in initiate_group_chat (attempt %d/%d): %s: %s",
+                    attempt, max_retries, type(e).__name__, e,
+                )
+                raise
         else:
             # for-loop exhausted without break (all retries failed via continue)
             if _last_error is not None:
@@ -1049,6 +1065,13 @@ class CMBAgent:
                     "All %d retry attempts exhausted: %s", max_retries, _last_error
                 )
                 raise _last_error
+
+        # If we reach here without a successful chat_result, something went
+        # very wrong in the retry logic — raise instead of using None values.
+        if chat_result is None:
+            raise RuntimeError(
+                "initiate_group_chat failed: no result after %d attempts" % max_retries
+            )
 
         self.final_context = copy.deepcopy(context_variables)
 
