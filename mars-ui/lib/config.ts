@@ -4,7 +4,7 @@
  */
 
 // Derive the API base URL once (used for both REST and WebSocket fallback)
-const _apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const _apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001';
 
 export const config = {
   // API URL for REST endpoints
@@ -39,10 +39,44 @@ export function getApiUrl(endpoint: string): string {
 }
 
 /**
- * Get the full WebSocket URL for a given endpoint
+ * Get the full WebSocket URL for a given endpoint.
+ *
+ * In the browser we can't use `localhost` because that resolves to the user's
+ * own machine, not the EC2 server. Instead we:
+ *   1. Use NEXT_PUBLIC_WS_URL directly if it is explicitly set.
+ *   2. Parse NEXT_PUBLIC_API_URL for the backend port, then substitute
+ *      window.location.hostname (the real server IP/domain) so the WS
+ *      connection lands on the same host the browser is already talking to.
+ *   3. Fall back to window.location.host (same-origin) if nothing is set.
  */
 export function getWsUrl(endpoint: string): string {
-  const base = config.wsUrl.replace(/\/$/, '');
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+  if (typeof window !== 'undefined') {
+    // Explicit WS override — trust it completely
+    if (process.env.NEXT_PUBLIC_WS_URL) {
+      return `${process.env.NEXT_PUBLIC_WS_URL.replace(/\/$/, '')}${path}`;
+    }
+
+    // Derive from NEXT_PUBLIC_API_URL: keep the port, use the real browser hostname
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || '';
+    try {
+      const url = new URL(apiBase || 'http://localhost:8001');
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // If API URL uses localhost/127.0.0.1 (a server-side convenience value),
+      // replace it with the hostname the browser used to reach the page.
+      const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
+      const host = isLocal ? window.location.hostname : url.hostname;
+      const port = url.port;
+      return `${protocol}//${host}${port ? ':' + port : ''}${path}`;
+    } catch {
+      // Absolute fallback: same origin as the page
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      return `${protocol}//${window.location.host}${path}`;
+    }
+  }
+
+  // Server-side (SSR): use the configured WS URL directly
+  const base = config.wsUrl.replace(/\/$/, '');
   return `${base}${path}`;
 }
