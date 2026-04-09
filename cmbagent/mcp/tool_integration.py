@@ -5,6 +5,7 @@ This module wraps MCP tools so they can be registered and used by AG2 agents.
 """
 
 import asyncio
+import json
 import logging
 from typing import Any, Callable, Dict, Optional
 import inspect
@@ -12,6 +13,11 @@ import inspect
 from .client_manager import MCPClientManager
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Output size guard — same limit as the rest of the cmbagent tool pipeline.
+# ---------------------------------------------------------------------------
+_MAX_TOOL_OUTPUT_CHARS = 25_000   # ≈ 6 k tokens
 
 # Try to import AG2/AutoGen
 try:
@@ -194,7 +200,7 @@ class MCPToolIntegration:
             result: Raw result from MCP tool
             
         Returns:
-            Formatted string result
+            Formatted string result, capped at _MAX_TOOL_OUTPUT_CHARS
         """
         if isinstance(result, list):
             # MCP returns list of content items
@@ -206,17 +212,33 @@ class MCPToolIntegration:
                     if 'text' in item:
                         formatted_parts.append(item['text'])
                     else:
-                        formatted_parts.append(str(item))
+                        formatted_parts.append(json.dumps(item, ensure_ascii=False, default=str))
                 else:
                     formatted_parts.append(str(item))
-            return '\n'.join(formatted_parts)
+            text = '\n'.join(formatted_parts)
         elif isinstance(result, dict):
-            # If result is dict, format nicely
+            # If result is dict, format as compact JSON
             if 'text' in result:
-                return result['text']
-            return str(result)
+                text = result['text']
+            else:
+                try:
+                    text = json.dumps(result, ensure_ascii=False, default=str)
+                except (TypeError, ValueError):
+                    text = str(result)
         else:
-            return str(result)
+            text = str(result)
+
+        # Hard cap to stay within context budget
+        if len(text) > _MAX_TOOL_OUTPUT_CHARS:
+            head = int(_MAX_TOOL_OUTPUT_CHARS * 0.70)
+            tail = _MAX_TOOL_OUTPUT_CHARS - head
+            text = (
+                text[:head]
+                + "\n\n... [MCP tool output truncated: "
+                + f"{len(text)} → {_MAX_TOOL_OUTPUT_CHARS} chars] ...\n\n"
+                + text[-tail:]
+            )
+        return text
     
     def get_registered_tool_names(self) -> list:
         """Get list of registered tool names."""

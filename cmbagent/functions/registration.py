@@ -1,7 +1,9 @@
 """Main coordinator for registering all functions to agents."""
 
+import json
 import logging
 import structlog
+from functools import wraps
 from ..cmbagent_utils import cmbagent_disable_display
 from .ideas import setup_idea_functions
 from .keywords import setup_keyword_functions
@@ -11,6 +13,86 @@ from .status import setup_status_functions
 from .copilot import setup_copilot_functions
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Tool output safety wrapper — caps any tool return value so a single call
+# (e.g. DirectoryReadTool scanning into .venv / node_modules) cannot inject
+# hundreds of thousands of tokens into the group-chat messages.
+#
+# This wrapper is applied at the executor-registration chokepoint so that
+# ALL tools (Interop, CrewAI, LangChain, news, raw callables) pass through
+# a single output gate before their return value enters the group chat.
+# ---------------------------------------------------------------------------
+_MAX_TOOL_OUTPUT_CHARS = 25_000   # ≈ 6 k tokens — preserves research content quality
+
+_DIR_BLACKLIST_FRAGMENTS = (
+    '.venv', 'venv/', '__pycache__', 'node_modules', '.git/',
+    '.tox', '.mypy_cache', '.pytest_cache', '/dist/', '/build/',
+    '.eggs', '.egg-info', '.cache', '.npm', '.yarn',
+)
+
+
+def _cap_output(result_str: str, tool_name: str = "") -> str:
+    """Truncate a string result to _MAX_TOOL_OUTPUT_CHARS with 70/30 head/tail."""
+    if len(result_str) <= _MAX_TOOL_OUTPUT_CHARS:
+        return result_str
+    head = int(_MAX_TOOL_OUTPUT_CHARS * 0.70)
+    tail = _MAX_TOOL_OUTPUT_CHARS - head
+    return (
+        result_str[:head]
+        + f"\n\n... [output truncated: {len(result_str)} → {_MAX_TOOL_OUTPUT_CHARS} chars"
+        + (f" for '{tool_name}'" if tool_name else "")
+        + "] ...\n\n"
+        + result_str[-tail:]
+    )
+
+
+def _safe_tool_wrapper(tool_func, tool_name: str = ""):
+    """Return a version of *tool_func* whose output is size-capped.
+
+    Handles both ``str`` and ``dict`` returns (news tools return dicts that
+    AG2 serialises to str via ``str()``).  By converting here we ensure
+    compact JSON and a hard char cap before the value enters the chat.
+    """
+    @wraps(tool_func)
+    def _wrapped(*args, **kwargs):
+        result = tool_func(*args, **kwargs)
+
+        # --- Convert dict/list to compact JSON string early ---------------
+        if isinstance(result, (dict, list)):
+            try:
+                result = json.dumps(result, ensure_ascii=False, default=str)
+            except (TypeError, ValueError):
+                result = str(result)
+
+        if not isinstance(result, str):
+            result = str(result)
+
+        # --- Filter noisy directory entries --------------------------------
+        name_lower = tool_name.lower()
+        is_dir_tool = any(kw in name_lower for kw in (
+            'directory', 'list_dir', 'listdir', 'read_directory',
+        ))
+        if is_dir_tool:
+            lines = result.splitlines()
+            lines = [
+                l for l in lines
+                if not any(bl in l.lower() for bl in _DIR_BLACKLIST_FRAGMENTS)
+            ]
+            result = "\n".join(lines)
+
+        # --- Hard cap ------------------------------------------------------
+        result = _cap_output(result, tool_name)
+        return result
+
+    # Preserve AG2 metadata needed for registration
+    _wrapped.__name__ = getattr(tool_func, '__name__', tool_name or 'tool')
+    _wrapped.__doc__ = getattr(tool_func, '__doc__', '')
+    # Carry forward any annotations (AG2 uses these for parameter schemas)
+    if hasattr(tool_func, '__annotations__'):
+        _wrapped.__annotations__ = tool_func.__annotations__
+    return _wrapped
 
 
 def register_functions_to_agents(cmbagent_instance):
@@ -95,10 +177,30 @@ def register_functions_to_agents(cmbagent_instance):
                     except Exception as e:
                         logger.warning("agent_tool_registration_failed", agent=agent.name, error=str(e))
 
-                # Register tools for execution with executor
+                # Register tools for execution with executor.
+                #
+                # AG2 Interop Tool objects (Wikipedia, ArXiv, CrewAI tools, etc.)
+                # are registered as-is to preserve their internal metadata and
+                # AG2's name-matching between register_for_llm ↔ register_for_execution.
+                # Their output is capped at the message level by MessageContentTruncator.
+                #
+                # Raw callables (news tools, duckduckgo, etc.) are wrapped with
+                # _safe_tool_wrapper to convert dict→compact JSON + size cap at source.
+                try:
+                    from autogen.tools.tool import Tool as _AG2Tool
+                except ImportError:
+                    _AG2Tool = None
+
                 try:
                     for tool in combined_tools:
-                        executor.register_for_execution()(tool)
+                        if _AG2Tool is not None and isinstance(tool, _AG2Tool):
+                            # AG2 Tool objects: register natively
+                            executor.register_for_execution()(tool)
+                        else:
+                            # Raw callables: wrap for dict→JSON + size cap
+                            tool_name = getattr(tool, '__name__', getattr(tool, 'name', str(tool)))
+                            wrapped = _safe_tool_wrapper(tool, tool_name)
+                            executor.register_for_execution()(wrapped)
                     logger.info("tools_registered_for_execution", tool_count=len(combined_tools), executor="executor")
                 except Exception as e:
                     logger.warning("executor_tool_registration_failed", error=str(e))

@@ -14,7 +14,7 @@ from pathlib import Path
 import time
 import pickle
 from collections import defaultdict
-from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError
+from openai import OpenAI, RateLimitError, APITimeoutError, APIConnectionError, BadRequestError
 from typing import List, Dict, Any, Optional
 from .llm_provider import create_openai_client
 import glob
@@ -867,6 +867,46 @@ class CMBAgent:
         this_shared_context.setdefault('available_agents_info', '')
         this_shared_context.setdefault('copilot_context', '{}')
 
+        # ------------------------------------------------------------------
+        # Pre-flight context size guard — estimate total char payload of the
+        # shared context that will be injected into agent system prompts.
+        # If it exceeds a safe budget, aggressively compress the largest
+        # fields *before* AG2 starts the conversation.  This prevents the
+        # 400 "context_length_exceeded" error that cannot be retried.
+        # ------------------------------------------------------------------
+        _PREFLIGHT_MAX_CHARS = 200_000  # ~50k tokens — safe for all models
+        _FIELD_CAP = 15_000             # hard-cap any single field
+
+        def _estimate_ctx_chars(ctx):
+            total = 0
+            for v in ctx.values():
+                if isinstance(v, str):
+                    total += len(v)
+            return total
+
+        ctx_chars = _estimate_ctx_chars(this_shared_context)
+        if ctx_chars > _PREFLIGHT_MAX_CHARS:
+            self.logger.warning(
+                "Pre-flight context too large (%d chars, limit %d). "
+                "Compacting large fields before group chat.",
+                ctx_chars, _PREFLIGHT_MAX_CHARS,
+            )
+            # Sort fields by size, truncate largest first
+            sized = sorted(
+                ((k, v) for k, v in this_shared_context.items() if isinstance(v, str)),
+                key=lambda kv: len(kv[1]),
+                reverse=True,
+            )
+            for key, val in sized:
+                if len(val) > _FIELD_CAP:
+                    this_shared_context[key] = (
+                        val[:_FIELD_CAP]
+                        + f"\n... [{key} truncated from {len(val)} to {_FIELD_CAP} chars "
+                        f"to stay within context budget]"
+                    )
+            ctx_chars = _estimate_ctx_chars(this_shared_context)
+            self.logger.info("Post-compaction context: %d chars", ctx_chars)
+
         context_variables = ContextVariables(data=this_shared_context)
 
         # Create the pattern
@@ -919,7 +959,7 @@ class CMBAgent:
                     max_rounds = max_rounds,
                 )
                 break  # success
-            except (RateLimitError, APITimeoutError, APIConnectionError) as e:
+            except (RateLimitError, APITimeoutError, APIConnectionError, BadRequestError) as e:
                 error_text = str(e)
                 token_match = re.search(r"Limit\s+(\d+),\s+Requested\s+(\d+)", error_text)
                 is_request_too_large = (
@@ -927,8 +967,30 @@ class CMBAgent:
                     and "request too large" in error_text.lower()
                     and "tokens per min" in error_text.lower()
                 )
+                is_context_length_exceeded = (
+                    isinstance(e, BadRequestError)
+                    and "context_length_exceeded" in error_text.lower()
+                )
 
-                if is_request_too_large:
+                if is_request_too_large or is_context_length_exceeded:
+                    # For context_length_exceeded, aggressively compact the
+                    # shared context fields (previous_steps_execution_summary
+                    # is the typical offender).
+                    if is_context_length_exceeded:
+                        self.logger.warning(
+                            "Context length exceeded (attempt %d/%d). "
+                            "Aggressively compacting shared context.",
+                            attempt, max_retries,
+                        )
+                        _compact_limit = 8_000
+                        for _ck, _cv in list(context_variables.items()):
+                            if isinstance(_cv, str) and len(_cv) > _compact_limit:
+                                context_variables[_ck] = (
+                                    _cv[:_compact_limit]
+                                    + f"\n... [{_ck} emergency-compacted to {_compact_limit} chars]"
+                                )
+                        time.sleep(1)
+                        continue
                     compacted_messages, did_compact = _compact_message_payload(current_messages)
                     if did_compact:
                         self.logger.warning(

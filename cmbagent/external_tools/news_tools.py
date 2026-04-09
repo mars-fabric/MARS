@@ -847,7 +847,7 @@ def announcements_noauth(
         "query": query,
         "company": company or "all",
         "count": len(merged),
-        "items": merged[: max(1, min(limit, 300))],
+        "items": merged[: max(1, min(limit, 50))],
     }
 
 

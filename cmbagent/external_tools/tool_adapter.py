@@ -14,6 +14,49 @@ import json
 
 logger = structlog.get_logger(__name__)
 
+# ---------------------------------------------------------------------------
+# Output size guard — prevents any single tool call from injecting a huge
+# string into the group chat messages and blowing the context window.
+# ---------------------------------------------------------------------------
+_MAX_TOOL_OUTPUT_CHARS = 25_000   # ~6k tokens — preserves research content quality
+
+# Directories that should NEVER appear in file-listing tool output
+_DIR_EXCLUDE_PATTERNS = {
+    '.venv', 'venv', '__pycache__', 'node_modules', '.git',
+    '.tox', '.mypy_cache', '.pytest_cache', 'dist', 'build',
+    '.eggs', '*.egg-info', '.cache', '.npm', '.yarn',
+}
+
+
+def _cap_tool_output(result: str, tool_name: str = "") -> str:
+    """Truncate a tool result string to stay within context budget."""
+    if not isinstance(result, str):
+        result = str(result)
+    if len(result) <= _MAX_TOOL_OUTPUT_CHARS:
+        return result
+    head = int(_MAX_TOOL_OUTPUT_CHARS * 0.70)
+    tail = _MAX_TOOL_OUTPUT_CHARS - head
+    return (
+        result[:head]
+        + f"\n\n... [output truncated from {len(result)} to {_MAX_TOOL_OUTPUT_CHARS} chars"
+        + f" for tool '{tool_name}'] ...\n\n"
+        + result[-tail:]
+    )
+
+
+def _filter_directory_output(result: str) -> str:
+    """Remove lines referencing excluded directories from directory listing output."""
+    if not isinstance(result, str):
+        return result
+    lines = result.splitlines()
+    filtered = []
+    for line in lines:
+        line_lower = line.lower()
+        if any(pat in line_lower for pat in _DIR_EXCLUDE_PATTERNS):
+            continue
+        filtered.append(line)
+    return "\n".join(filtered)
+
 try:
     from autogen.interop import Interoperability
     HAS_INTEROP = True
@@ -55,6 +98,11 @@ class AG2ToolAdapter:
             """Wrapper function for AG2 compatibility."""
             try:
                 result = self.function(*args, **kwargs)
+                if isinstance(result, str):
+                    tool_lower = self.name.lower()
+                    if any(kw in tool_lower for kw in ('directory', 'list_dir', 'listdir')):
+                        result = _filter_directory_output(result)
+                    result = _cap_tool_output(result, self.name)
                 return result
             except Exception as e:
                 return f"Error executing {self.name}: {str(e)}"

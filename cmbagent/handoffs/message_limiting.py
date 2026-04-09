@@ -19,10 +19,83 @@ Fixes addressed:
    the corresponding ``role="tool"`` responses → Azure/OpenAI 400 error.
 """
 
+import re
 from typing import Dict, List, Any
 from autogen.agentchat.contrib.capabilities.transform_messages import TransformMessages
 from autogen.agentchat.contrib.capabilities.transforms import MessageHistoryLimiter
 from .debug import debug_print
+
+
+# ---------------------------------------------------------------------------
+# Per-message content truncator  — keeps any single tool result / assistant
+# reply from dominating the entire context window.
+# ---------------------------------------------------------------------------
+_MAX_MSG_CONTENT_CHARS = 25_000      # ≈ 6 k tokens per message — enough for research content
+_DIR_BLACKLIST_FRAGMENTS = (
+    '.venv', 'venv/', '__pycache__', 'node_modules/', '.git/',
+    '.tox/', '.mypy_cache', '.pytest_cache', '/dist/', '/build/',
+    '.eggs', '.egg-info', '.cache/', '.npm/', '.yarn/',
+    'site-packages/',
+)
+
+
+class MessageContentTruncator:
+    """AG2 message transform that caps individual message content.
+
+    Applied *before* other transforms so that downstream limiters work
+    on already-reasonable sizes.  Particularly important for tool-role
+    messages whose content is the raw return value of external tools
+    (e.g. ``DirectoryReadTool`` dumping .venv).
+    """
+
+    def __init__(self, max_chars: int = _MAX_MSG_CONTENT_CHARS):
+        self._max = max_chars
+
+    # ---- AG2 transform interface ----
+    def apply_transform(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        for msg in messages:
+            content = msg.get("content")
+            if isinstance(content, str):
+                role = msg.get("role", "")
+                # Always filter directory noise from tool outputs
+                if role == "tool":
+                    content = self._filter_dir_noise(content)
+                    # Collapse consecutive blank lines (common in scraped HTML)
+                    content = re.sub(r'\n{4,}', '\n\n\n', content)
+                if len(content) > self._max:
+                    content = self._truncate(content, role)
+                if content is not msg.get("content"):
+                    msg = {**msg, "content": content}
+            out.append(msg)
+        return out
+
+    def get_logs(self, pre_transform_messages, post_transform_messages):
+        """Required by AG2 TransformMessages interface."""
+        return {}, False
+
+    # ---- helpers ----
+    def _truncate(self, text: str, role: str) -> str:
+        head = int(self._max * 0.70)   # 70 % head — keeps abstracts, findings, key data
+        tail = self._max - head         # 30 % tail — keeps conclusions, final answers
+        return (
+            text[:head]
+            + f"\n\n... [content truncated: {len(text)} → {self._max} chars] ...\n\n"
+            + text[-tail:]
+        )
+
+    @staticmethod
+    def _filter_dir_noise(text: str) -> str:
+        """Remove lines referencing virtual-env / node_modules paths."""
+        lines = text.splitlines()
+        filtered = [
+            l for l in lines
+            if not any(bl in l.lower() for bl in _DIR_BLACKLIST_FRAGMENTS)
+        ]
+        # Only bother if we actually removed something
+        if len(filtered) < len(lines):
+            return "\n".join(filtered)
+        return text
 
 
 class SafeMessageHistoryLimiter(MessageHistoryLimiter):
@@ -190,6 +263,56 @@ def apply_message_history_limiting(agents: Dict):
     """
     debug_print('Applying message history limiting...')
 
+    # ------------------------------------------------------------------
+    # 1. Per-message content truncator — applied to EVERY agent so that
+    #    no single tool output or assistant reply can dominate context.
+    #    We iterate all agents in the dict rather than a hardcoded list
+    #    so newly added agents are automatically covered.
+    # ------------------------------------------------------------------
+    content_truncator = TransformMessages(
+        transforms=[MessageContentTruncator(max_chars=_MAX_MSG_CONTENT_CHARS)]
+    )
+
+    applied_content = 0
+    for agent_name, agent_obj in agents.items():
+        try:
+            content_truncator.add_to_agent(agent_obj.agent)
+            applied_content += 1
+        except Exception:
+            pass  # some agents may not support transforms
+
+    debug_print(f'Applied content truncator to {applied_content}/{len(agents)} agents\n', indent=2)
+
+    # ------------------------------------------------------------------
+    # 2. Message-count limiter for agents that tend to accumulate long
+    #    chat histories (give generous budget of 30 messages for core
+    #    agents — enough for multi-turn tool use within a step).
+    # ------------------------------------------------------------------
+    core_history_limit = TransformMessages(
+        transforms=[SafeMessageHistoryLimiter(max_messages=30)]
+    )
+
+    history_limit_agents = [
+        'engineer', 'researcher', 'executor',
+        'web_surfer', 'retrieve_assistant',
+        'idea_maker', 'idea_hater',
+    ]
+
+    applied_history = 0
+    for agent_name in history_limit_agents:
+        if agent_name in agents:
+            try:
+                core_history_limit.add_to_agent(agents[agent_name].agent)
+                applied_history += 1
+            except Exception:
+                pass
+
+    debug_print(f'Applied history limiter (30 msgs) to {applied_history} core agents\n', indent=2)
+
+    # ------------------------------------------------------------------
+    # 3. Tight limiter for response formatters (only need last few msgs)
+    # ------------------------------------------------------------------
+
     # Use max_messages=3 for general formatters – gives enough buffer
     # for retry scenarios where tool-role messages accumulate.
     context_handling = TransformMessages(
@@ -220,4 +343,4 @@ def apply_message_history_limiting(agents: Dict):
         if agent_name in agents:
             context_handling.add_to_agent(agents[agent_name].agent)
 
-    debug_print(f'Applied to {len([a for a in formatter_agents if a in agents])} agents\n', indent=2)
+    debug_print(f'Applied formatter limiter (3 msgs) to {len([a for a in formatter_agents if a in agents])} agents\n', indent=2)
