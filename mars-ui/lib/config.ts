@@ -3,12 +3,17 @@
  * Uses environment variables with fallbacks for local development
  */
 
+// Derive the API base URL once (used for both REST and WebSocket fallback)
+const _apiBase = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 export const config = {
   // API URL for REST endpoints
-  apiUrl: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000',
+  apiUrl: _apiBase,
 
-  // WebSocket URL for real-time communication
-  wsUrl: process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000',
+  // WebSocket URL — if NEXT_PUBLIC_WS_URL is not set, derive from apiUrl
+  // so both ports always share the same host:port (no separate env var needed).
+  // e.g. http://EC2-IP:8001 → ws://EC2-IP:8001
+  wsUrl: process.env.NEXT_PUBLIC_WS_URL || _apiBase.replace(/^https?/, m => m === 'https' ? 'wss' : 'ws'),
 
   // Work directory for task outputs and logs
   workDir: process.env.NEXT_PUBLIC_CMBAGENT_WORK_DIR || '~/Desktop/cmbdir',
