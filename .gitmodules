@@ -1,0 +1,3 @@
+[submodule "original/cmbagent"]
+	path = original/cmbagent
+	url = https://github.com/CMBAgents/cmbagent.git
