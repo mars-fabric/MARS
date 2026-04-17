@@ -197,7 +197,10 @@ export function useReleaseNotesTask(): UseReleaseNotesTaskReturn {
     if (!id) return null
     try {
       const content: ReleaseNotesStageContent = await apiFetch(`/api/release-notes/${id}/stages/${stageNum}/content`)
-      setEditableContent(content.content ?? '')
+      // Guard against backend returning the literal string "None" (Python str(None))
+      const raw = content.content ?? ''
+      const sanitized = (raw === 'None' || raw === 'null') ? '' : raw
+      setEditableContent(sanitized)
       setStageDocuments(content.documents ?? null)
       return content
     } catch {

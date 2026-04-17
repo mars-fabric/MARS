@@ -512,11 +512,15 @@ export default function TasksPage() {
                   className="text-xs"
                   style={{ color: 'var(--mars-color-text-tertiary)' }}
                 >
-                  {task.current_stage
+                  {task.status === 'completed'
+                    ? 'All stages completed'
+                    : task.status === 'failed'
+                    ? `Stage ${task.current_stage ?? '?'}: ${RN_STAGE_NAMES[task.current_stage ?? 0] || ''} · Failed`
+                    : task.current_stage
                     ? `Stage ${task.current_stage}: ${RN_STAGE_NAMES[task.current_stage] || ''}`
                     : 'Starting...'}
                   {' '}&middot;{' '}
-                  {Math.round(task.progress_percent)}% complete
+                  {task.status === 'completed' ? '100' : Math.round(task.progress_percent)}% complete
                   {task.base_branch && task.head_branch
                     ? ` · ${task.base_branch} → ${task.head_branch}`
                     : ''}
@@ -529,15 +533,25 @@ export default function TasksPage() {
                 <div
                   className="h-full rounded-full transition-all"
                   style={{
-                    width: `${Math.max(5, task.progress_percent)}%`,
-                    background: 'linear-gradient(90deg, #f59e0b, #d97706)',
+                    width: `${task.status === 'completed' ? 100 : Math.max(5, task.progress_percent)}%`,
+                    background: task.status === 'completed'
+                      ? 'linear-gradient(90deg, #22c55e, #16a34a)'
+                      : task.status === 'failed'
+                      ? 'linear-gradient(90deg, #ef4444, #dc2626)'
+                      : 'linear-gradient(90deg, #f59e0b, #d97706)',
                   }}
                 />
               </div>
-              <ArrowRight
-                className="w-4 h-4 flex-shrink-0"
-                style={{ color: 'var(--mars-color-text-tertiary)' }}
-              />
+              {task.status === 'completed' ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(34,197,94,0.15)', color: '#22c55e' }}>Done</span>
+              ) : task.status === 'failed' ? (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>Failed</span>
+              ) : (
+                <ArrowRight
+                  className="w-4 h-4 flex-shrink-0"
+                  style={{ color: 'var(--mars-color-text-tertiary)' }}
+                />
+              )}
               <div
                 role="button"
                 tabIndex={0}

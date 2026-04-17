@@ -400,6 +400,27 @@ def build_migration_output(
 # Shared utilities
 # ═══════════════════════════════════════════════════════════════════════════
 
+# Sentinel strings that AG2/AutoGen may inject when the real content is
+# Python ``None`` (e.g. tool-call-only messages).  These must never be
+# accepted as valid stage output.
+_NONE_SENTINELS = frozenset({"None", "none", "NONE", "null", "NULL", "TERMINATE"})
+
+
+def _is_meaningful(text: str | None) -> bool:
+    """Return True if *text* looks like genuine agent output."""
+    if not text:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    if stripped in _NONE_SENTINELS:
+        return False
+    # Very short responses (< 20 chars) that aren't content-like are suspect
+    if len(stripped) < 20 and stripped.replace('.', '').replace('!', '').strip() in _NONE_SENTINELS:
+        return False
+    return True
+
+
 def extract_stage_result(results: dict) -> str:
     """Extract the report content from chat_history.
 
@@ -412,7 +433,7 @@ def extract_stage_result(results: dict) -> str:
     for agent_name in ("researcher", "researcher_response_formatter"):
         try:
             candidate = get_task_result(chat_history, agent_name)
-            if candidate and candidate.strip():
+            if _is_meaningful(candidate):
                 task_result = candidate
                 break
         except ValueError:
@@ -424,8 +445,8 @@ def extract_stage_result(results: dict) -> str:
         best = ""
         for msg in chat_history:
             name = msg.get("name", "")
-            content = msg.get("content", "")
-            if name and content and content.strip():
+            content = msg.get("content") or ""
+            if name and _is_meaningful(content):
                 if len(content) > len(best):
                     best = content
         if best:

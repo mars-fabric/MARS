@@ -657,7 +657,7 @@ def _run_one_shot_sync(task: str, agent: str = "researcher", work_dir: str = Non
     return cmbagent.one_shot(
         task=task,
         agent=agent,
-        max_rounds=config_overrides.get("max_rounds", 3),
+        max_rounds=config_overrides.get("max_rounds", 15),
         engineer_model=engineer_model,
         researcher_model=researcher_model,
         work_dir=work_dir or tempfile.gettempdir(),
@@ -766,11 +766,27 @@ async def _run_release_notes_one_shot(
     extra = shared_state.get("extra_instructions", "")
     extra_section = f"## Additional Instructions\n{extra}" if extra else ""
 
+    # The release notes stage has 3 analysis documents that summarize the
+    # diff. Truncate the raw diff_context to keep the prompt manageable
+    # and avoid expensive compaction retries + slow LLM rounds.
+    diff_context = shared_state.get("diff_context", "")
+    if len(diff_context) > 20_000:
+        marker = "## Full Diff"
+        idx = diff_context.find(marker)
+        if idx > 0:
+            diff_context = diff_context[:idx] + (
+                f"## Full Diff\n[Full diff omitted for performance — "
+                f"{len(shared_state.get('diff_context', ''))} chars. "
+                f"Refer to the analysis documents for details.]\n"
+            )
+        else:
+            diff_context = diff_context[:20_000] + "\n\n... [diff truncated for performance]\n"
+
     task_prompt = release_notes_researcher_prompt.format(
         repo_name=shared_state.get("repo_name", "repository"),
         base_branch=shared_state.get("base_branch", ""),
         head_branch=shared_state.get("head_branch", ""),
-        diff_context=shared_state.get("diff_context", ""),
+        diff_context=diff_context,
         analysis_base=shared_state.get("analysis_base", ""),
         analysis_head=shared_state.get("analysis_head", ""),
         analysis_comparison=shared_state.get("analysis_comparison", ""),
@@ -829,12 +845,31 @@ async def _run_migration_one_shot(
     extra = shared_state.get("extra_instructions", "")
     extra_section = f"## Additional Instructions\n{extra}" if extra else ""
 
+    # The migration stage already has analysis_comparison and release_notes
+    # which summarize the diff — no need to send the full 200K-char raw diff.
+    # Truncate diff_context to the diff_stat + file list (skip the full diff)
+    # to keep the prompt within a reasonable token budget and avoid costly
+    # compaction retries + slow LLM rounds.
+    diff_context = shared_state.get("diff_context", "")
+    if len(diff_context) > 15_000:
+        # Keep everything before "## Full Diff" — that's the stat + file list
+        marker = "## Full Diff"
+        idx = diff_context.find(marker)
+        if idx > 0:
+            diff_context = diff_context[:idx] + (
+                f"## Full Diff\n[Full diff omitted for performance — "
+                f"{len(shared_state.get('diff_context', ''))} chars. "
+                f"Refer to analysis_comparison and release_notes above for details.]\n"
+            )
+        else:
+            diff_context = diff_context[:15_000] + "\n\n... [diff truncated for performance]\n"
+
     task_prompt = migration_researcher_prompt.format(
         repo_name=shared_state.get("repo_name", "repository"),
         base_branch=shared_state.get("base_branch", ""),
         head_branch=shared_state.get("head_branch", ""),
         migration_type=migration_type,
-        diff_context=shared_state.get("diff_context", ""),
+        diff_context=diff_context,
         analysis_comparison=shared_state.get("analysis_comparison", ""),
         release_notes=shared_state.get("release_notes", ""),
         extra_instructions_section=extra_section,
@@ -1035,7 +1070,7 @@ async def _run_package(task_id: str, shared_state: Dict[str, Any], buf_key: str)
 
 @router.get("/recent", response_model=list[ReleaseNotesRecentTaskResponse])
 async def list_recent_tasks():
-    """List incomplete Release Notes tasks for the resume flow."""
+    """List recent Release Notes tasks — both in-progress and recently completed."""
     db = _get_db()
     try:
         from cmbagent.database.models import WorkflowRun
@@ -1044,7 +1079,7 @@ async def list_recent_tasks():
             .filter(
                 WorkflowRun.mode == "release-notes",
                 WorkflowRun.parent_run_id.is_(None),
-                WorkflowRun.status.in_(["executing", "draft", "planning"]),
+                WorkflowRun.status.in_(["executing", "draft", "planning", "completed", "failed"]),
             )
             .order_by(WorkflowRun.started_at.desc())
             .limit(20)
@@ -1331,48 +1366,34 @@ async def update_stage_content(task_id: str, stage_num: int, request: ReleaseNot
 
 @router.post("/{task_id}/stages/{stage_num}/refine", response_model=ReleaseNotesRefineResponse)
 async def refine_stage_content(task_id: str, stage_num: int, request: ReleaseNotesRefineRequest):
-    from cmbagent.llm_provider import safe_completion
+    """LLM refine for stage content."""
+    import concurrent.futures
 
-    content = request.content or ""
-    logger.info("releasenotes_refine task=%s stage=%d content_len=%d", task_id, stage_num, len(content))
-
-    # Truncate very large content to keep LLM response within proxy timeout.
-    # Preserve start + end for context (same approach as RFP refine).
-    MAX_CONTENT_CHARS = 12_000
-    if len(content) > MAX_CONTENT_CHARS:
-        half = MAX_CONTENT_CHARS // 2
-        content = content[:half] + "\n\n[... middle section trimmed for brevity ...]\n\n" + content[-half:]
-        logger.info("releasenotes_refine content truncated to %d chars", len(content))
-
-    system_msg = (
+    prompt = (
         "You are helping a software engineer refine release documentation. "
-        "Return ONLY the refined content, no preamble or explanations."
-    )
-    user_msg = (
-        f"--- CURRENT CONTENT ---\n{content}\n\n"
-        f"--- USER REQUEST ---\n{request.message}"
+        "Below is the current content, followed by the user's edit request.\n\n"
+        f"--- CURRENT CONTENT ---\n{request.content}\n\n"
+        f"--- USER REQUEST ---\n{request.message}\n\n"
+        "Provide the refined version. Return ONLY the refined content, no explanations."
     )
 
     try:
-        def _call_refine():
+        def _call_llm():
+            from cmbagent.llm_provider import safe_completion
             return safe_completion(
-                messages=[
-                    {"role": "system", "content": system_msg},
-                    {"role": "user", "content": user_msg},
-                ],
+                messages=[{"role": "user", "content": prompt}],
                 model="gpt-4o",
                 temperature=0.7,
                 max_tokens=4096,
             )
 
-        refined = await asyncio.to_thread(_call_refine)
-        refined = refined or request.content
+        loop = asyncio.get_event_loop()
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            refined = await loop.run_in_executor(executor, _call_llm)
 
-        logger.info("releasenotes_refine_ok task=%s stage=%d", task_id, stage_num)
-        return ReleaseNotesRefineResponse(refined_content=refined)
+        return ReleaseNotesRefineResponse(refined_content=refined or request.content)
     except Exception as e:
-        logger.error("releasenotes_refine_failed task=%s stage=%d error=%s", task_id, stage_num, e)
-        raise HTTPException(status_code=500, detail=f"Refinement failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Refinement failed: {str(e)}")
 
 
 @router.get("/{task_id}/stages/{stage_num}/console")
@@ -1419,6 +1440,118 @@ async def download_stage_file(task_id: str, stage_num: int, doc_key: str = None)
         path=file_path,
         filename=fname,
         media_type="text/markdown",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  GET /{task_id}/stages/{num}/download-pdf — download stage output as PDF
+# ═══════════════════════════════════════════════════════════════════════════
+
+_PDF_CSS = """
+@page { size: A4; margin: 2cm; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 11pt; line-height: 1.6; color: #1a1a1a;
+}
+h1 { font-size: 22pt; margin-top: 0; border-bottom: 2px solid #2563eb; padding-bottom: 6px; color: #1e293b; }
+h2 { font-size: 16pt; margin-top: 24px; color: #334155; }
+h3 { font-size: 13pt; margin-top: 18px; color: #475569; }
+code { background: #f1f5f9; padding: 2px 5px; border-radius: 3px; font-size: 10pt; }
+pre  { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px;
+       padding: 12px; overflow-x: auto; font-size: 9.5pt; line-height: 1.5; }
+pre code { background: none; padding: 0; }
+table { border-collapse: collapse; width: 100%; margin: 12px 0; }
+th, td { border: 1px solid #cbd5e1; padding: 8px 12px; text-align: left; font-size: 10pt; }
+th { background: #f1f5f9; font-weight: 600; }
+blockquote { border-left: 4px solid #2563eb; margin: 12px 0; padding: 8px 16px;
+             background: #f8fafc; color: #475569; }
+ul, ol { padding-left: 24px; }
+li { margin-bottom: 4px; }
+hr { border: none; border-top: 1px solid #e2e8f0; margin: 24px 0; }
+"""
+
+
+@router.get("/{task_id}/stages/{stage_num}/download-pdf")
+async def download_stage_pdf(task_id: str, stage_num: int, doc_key: str = None):
+    """Download a stage output as PDF. For multi-doc stages, specify doc_key."""
+    if stage_num < 1 or stage_num > 5:
+        raise HTTPException(status_code=400, detail="stage_num must be 1-5")
+
+    sdef = STAGE_DEFS[stage_num - 1]
+    db = _get_db()
+    try:
+        session_id = _get_session_id_for_task(task_id, db)
+        repo = _get_stage_repo(db, session_id=session_id)
+        stages = repo.list_stages(parent_run_id=task_id)
+        stage = next((s for s in stages if s.stage_number == stage_num), None)
+        if not stage:
+            raise HTTPException(status_code=404, detail=f"Stage {stage_num} not found")
+
+        from cmbagent.database.models import WorkflowRun
+        parent = db.query(WorkflowRun).filter(WorkflowRun.id == task_id).first()
+        if not parent:
+            raise HTTPException(status_code=404, detail="Task not found")
+        wd = (parent.meta or {}).get("work_dir", _get_work_dir(task_id))
+        repo_name = (parent.meta or {}).get("repo_name", "release-notes")
+
+        # Resolve the markdown content — prefer DB shared_state, fall back to file
+        md_content = None
+        if stage.output_data and "shared" in stage.output_data:
+            shared = stage.output_data["shared"]
+            if sdef.get("multi_doc") and doc_key and doc_key in (sdef.get("doc_keys") or []):
+                md_content = shared.get(doc_key)
+            elif sdef.get("shared_key"):
+                md_content = shared.get(sdef["shared_key"])
+
+        if not md_content:
+            # Fall back to file on disk
+            if sdef.get("multi_doc") and doc_key:
+                key_to_file = dict(zip(sdef["doc_keys"], sdef["doc_files"]))
+                fname = key_to_file.get(doc_key)
+            else:
+                fname = sdef.get("file")
+            if fname:
+                fp = os.path.join(wd, "input_files", fname)
+                if os.path.exists(fp):
+                    with open(fp, "r") as f:
+                        md_content = f.read()
+
+        if not md_content:
+            raise HTTPException(status_code=404, detail="No content available for this stage")
+    finally:
+        db.close()
+
+    # Convert markdown → HTML → PDF
+    import markdown as md_lib
+    from weasyprint import HTML
+
+    html_body = md_lib.markdown(
+        md_content,
+        extensions=["tables", "fenced_code", "codehilite", "toc", "sane_lists"],
+    )
+    full_html = (
+        f"<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<style>{_PDF_CSS}</style></head>"
+        f"<body>{html_body}</body></html>"
+    )
+
+    pdf_bytes = HTML(string=full_html).write_pdf()
+
+    # Build filename
+    pdf_name = f"{repo_name}_{sdef['name']}"
+    if doc_key:
+        pdf_name += f"_{doc_key}"
+    pdf_name += ".pdf"
+
+    pdf_path = os.path.join(wd, "input_files", pdf_name)
+    with open(pdf_path, "wb") as f:
+        f.write(pdf_bytes)
+
+    return FileResponse(
+        path=pdf_path,
+        filename=pdf_name,
+        media_type="application/pdf",
     )
 
 

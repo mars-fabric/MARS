@@ -544,6 +544,7 @@ function AnalysisStagePanel({ hook, onNext, onBack }: AnalysisStagePanelProps) {
   }, [editableContent, refineContent])
 
   const handleApplyRefinement = useCallback((content: string) => {
+    if (!content || !content.trim()) return
     setEditableContent(content)
     if (stageDocuments) {
       setStageDocuments({ ...stageDocuments, [activeTab]: content })
@@ -750,6 +751,7 @@ interface ReviewStagePanelProps {
 
 function ReviewStagePanel({ hook, stageNum, stageName, sharedKey, onNext, onBack }: ReviewStagePanelProps) {
   const {
+    taskId,
     taskState,
     editableContent,
     setEditableContent,
@@ -798,7 +800,9 @@ function ReviewStagePanel({ hook, stageNum, stageName, sharedKey, onNext, onBack
   }, [stageNum, editableContent, refineContent])
 
   const handleApplyRefinement = useCallback((content: string) => {
-    setEditableContent(content)
+    if (content && content.trim()) {
+      setEditableContent(content)
+    }
   }, [setEditableContent])
 
   // Pre-execution state
@@ -855,6 +859,19 @@ function ReviewStagePanel({ hook, stageNum, stageName, sharedKey, onNext, onBack
           )}
         </div>
         <div className="flex items-center gap-2">
+          {taskId && (
+            <Button
+              onClick={() => {
+                const url = getApiUrl(`/api/release-notes/${taskId}/stages/${stageNum}/download-pdf`)
+                window.open(url, '_blank')
+              }}
+              variant="secondary"
+              size="sm"
+            >
+              <Download className="w-3.5 h-3.5 mr-1" />
+              PDF
+            </Button>
+          )}
           <Button
             onClick={() => setMode(mode === 'edit' ? 'preview' : 'edit')}
             variant="secondary"
@@ -937,6 +954,7 @@ interface MigrationPanelProps {
 
 function MigrationPanel({ hook, onNext, onBack }: MigrationPanelProps) {
   const {
+    taskId,
     taskState,
     editableContent,
     setEditableContent,
@@ -992,7 +1010,9 @@ function MigrationPanel({ hook, onNext, onBack }: MigrationPanelProps) {
   }, [editableContent, refineContent])
 
   const handleApplyRefinement = useCallback((content: string) => {
-    setEditableContent(content)
+    if (content && content.trim()) {
+      setEditableContent(content)
+    }
   }, [setEditableContent])
 
   // ── Still generating ──
@@ -1040,6 +1060,17 @@ function MigrationPanel({ hook, onNext, onBack }: MigrationPanelProps) {
               Migration Scripts
             </span>
             <div className="flex items-center gap-2">
+              {taskId && (
+                <Button
+                  onClick={() => {
+                    const url = getApiUrl(`/api/release-notes/${taskId}/stages/4/download-pdf`)
+                    window.open(url, '_blank')
+                  }}
+                  variant="secondary" size="sm"
+                >
+                  <Download className="w-3.5 h-3.5 mr-1" /> PDF
+                </Button>
+              )}
               <Button
                 onClick={() => setMode(mode === 'edit' ? 'preview' : 'edit')}
                 variant="secondary" size="sm"
